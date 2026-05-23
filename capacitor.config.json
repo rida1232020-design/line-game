@@ -1,0 +1,18 @@
+{
+  "appId": "com.goalrush.game",
+  "appName": "Line Game",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 2000,
+      "backgroundColor": "#09090f",
+      "showSpinner": true,
+      "androidSpinnerStyle": "large",
+      "spinnerColor": "#ffd700"
+    }
+  }
+}
