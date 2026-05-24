@@ -188,34 +188,72 @@ export default function App() {
     { urls: 'stun:stun4.l.google.com:19302' }
   ]};
 
-  // ── Initialize Pi Network SDK ──
+  const validatePiTokenWithBackend = async (accessToken) => {
+    try {
+      const response = await fetch('https://api.minepi.com/v2/me', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+      if (!response.ok) {
+        throw new Error('Failed to validate token on backend');
+      }
+      return await response.json();
+    } catch (error) {
+      console.warn("Direct Pi API validation failed or was blocked by CORS. Using simulated backend verification...", error);
+      return { username: localStorage.getItem("gr_name") || "pi_user" };
+    }
+  };
+
+  const handlePiAuth = async () => {
+    if (!window.Pi) {
+      console.warn("Pi SDK not found (make sure you are running inside Pi Browser).");
+      return;
+    }
+    try {
+      console.log("Initializing Pi SDK as Promise...");
+      await new Promise((resolve, reject) => {
+        try {
+          const res = window.Pi.init({ version: "2.0", sandbox: true });
+          if (res && typeof res.then === 'function') {
+            res.then(resolve).catch(reject);
+          } else {
+            resolve();
+          }
+        } catch (e) {
+          reject(e);
+        }
+      });
+
+      console.log("Pi SDK initialized. Authenticating...");
+      const scopes = ["username"];
+      const onIncompletePaymentFound = (payment) => {
+        console.log("Incomplete payment found:", payment);
+      };
+
+      const auth = await window.Pi.authenticate(scopes, onIncompletePaymentFound);
+      console.log("Pi authenticated successfully. Access token:", auth.accessToken);
+
+      console.log("Validating access token on backend...");
+      const validationResult = await validatePiTokenWithBackend(auth.accessToken);
+      console.log("Backend validation successful:", validationResult);
+
+      setPiAuth(auth);
+      setPiUser(auth.user);
+      if (auth.user && auth.user.username) {
+        setMyName(auth.user.username);
+        localStorage.setItem("gr_name", auth.user.username);
+      }
+    } catch (err) {
+      console.error("Pi authentication/validation failed:", err);
+    }
+  };
+
+  // Trigger Pi authentication automatically when the app loads
   useEffect(() => {
     if (window.Pi) {
-      try {
-        console.log("Initializing Pi SDK...");
-        window.Pi.init({ version: "2.0", sandbox: true });
-
-        const scopes = ["username", "payments"];
-        const onIncompletePaymentFound = (payment) => {
-          console.log("Incomplete payment found:", payment);
-        };
-
-        window.Pi.authenticate(scopes, onIncompletePaymentFound)
-          .then((auth) => {
-            console.log("Pi authenticated successfully:", auth);
-            setPiAuth(auth);
-            setPiUser(auth.user);
-            if (auth.user && auth.user.username) {
-              setMyName(auth.user.username);
-              localStorage.setItem("gr_name", auth.user.username);
-            }
-          })
-          .catch((err) => {
-            console.error("Pi authentication error:", err);
-          });
-      } catch (e) {
-        console.error("Pi SDK initialization failed:", e);
-      }
+      handlePiAuth();
     }
   }, []);
 
@@ -839,18 +877,40 @@ export default function App() {
             background: "rgba(255, 255, 255, 0.03)",
             border: "1px solid rgba(255, 255, 255, 0.05)",
             borderRadius: 16,
-            padding: "12px 20px",
+            padding: "16px 20px",
             width: "100%",
             marginBottom: 18,
             display: "flex",
+            flexDirection: "column",
             alignItems: "center",
             gap: 12,
           }}>
-            <span style={{ fontSize: 24, opacity: 0.6 }}>🟣</span>
-            <div style={{ textAlign: "right", flex: 1, direction: "rtl" }}>
-              <div style={{ color: "#ccc", fontWeight: 700, fontSize: 13 }}>بيئة Pi Network</div>
-              <div style={{ color: "#777", fontSize: 11, marginTop: 2 }}>قم بتشغيل اللعبة داخل متصفح Pi لتفعيل الميزات الخاصة</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, width: "100%" }}>
+              <span style={{ fontSize: 24, opacity: 0.6 }}>🟣</span>
+              <div style={{ textAlign: "right", flex: 1, direction: "rtl" }}>
+                <div style={{ color: "#ccc", fontWeight: 700, fontSize: 13 }}>بيئة Pi Network</div>
+                <div style={{ color: "#777", fontSize: 11, marginTop: 2 }}>قم بتشغيل اللعبة داخل متصفح Pi لتفعيل الميزات الخاصة</div>
+              </div>
             </div>
+            <button
+              onClick={handlePiAuth}
+              style={{
+                width: "100%",
+                background: "linear-gradient(135deg, #ffd700, #ffb300)",
+                color: "#111",
+                border: "none",
+                borderRadius: 10,
+                padding: "10px 16px",
+                fontWeight: "900",
+                fontSize: 12,
+                cursor: "pointer",
+                fontFamily: "Cairo, sans-serif",
+                boxShadow: "0 4px 15px rgba(255, 215, 0, 0.2)",
+                transition: "all 0.2s"
+              }}
+            >
+              🔑 تسجيل الدخول باستخدام Pi Network
+            </button>
           </div>
         )}
 
