@@ -62,9 +62,7 @@ export default function SettingsScreen({ settings, onUpdate, onBack, T }) {
         {/* Info box */}
         <div style={infoBox}>
           <div style={{ color: "#888", fontSize: 12, lineHeight: 1.7 }}>
-            {T("difficulty") === "AI Difficulty"
-              ? "🟢 Easy: AI plays randomly  •  🟡 Medium: Balanced AI  •  🔴 Hard: Near-perfect AI"
-              : "🟢 سهل: الذكاء الاصطناعي عشوائي  •  🟡 متوسط: متوازن  •  🔴 صعب: ذكاء اصطناعي كامل"}
+            {T("difficultyInfo")}
           </div>
         </div>
 

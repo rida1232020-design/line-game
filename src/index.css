@@ -24,6 +24,11 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+body.lang-en .inp,
+body.lang-en .chat-inp {
+  text-align: left;
+}
+
 /* Prevent text selection during game */
 #root { user-select: none; -webkit-user-select: none; }
 

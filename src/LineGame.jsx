@@ -1,5 +1,9 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "./supabaseClient";
+import { t, tf } from "./i18n.js";
+import { loadSettings } from "./store.js";
+import SettingsScreen from "./components/SettingsScreen.jsx";
+import StatsScreen from "./components/StatsScreen.jsx";
 
 // ═══════════════════════════════════════════════════════
 //  BOARD
@@ -111,7 +115,19 @@ function getBestMove(board, aiColor, depth = 3) {
 //  APP COMPONENT
 // ═══════════════════════════════════════════════════════
 export default function App() {
-  const [screen, setScreen] = useState("menu"); // menu, setup, setup-room, lobby, mm, game, difficulty
+  const [settings, setSettings] = useState(loadSettings);
+  const lang = settings.lang;
+  const dir = lang === "ar" ? "rtl" : "ltr";
+  const T = useCallback((key) => t(lang, key), [lang]);
+  const Tf = useCallback((key, vars) => tf(lang, key, vars), [lang]);
+
+  useEffect(() => {
+    document.documentElement.lang = lang;
+    document.documentElement.dir = dir;
+    document.body.classList.toggle("lang-en", lang === "en");
+  }, [lang, dir]);
+
+  const [screen, setScreen] = useState("menu"); // menu, setup, setup-room, lobby, mm, game, difficulty, settings, stats
   const [mode, setMode] = useState("pvp");      // pvp, pvc-g, pvc-r, online, online-room
   const [board, setBoard] = useState(initBoard());
   const [turn, setTurn] = useState("green");
@@ -143,7 +159,7 @@ export default function App() {
   const [piAuth, setPiAuth] = useState(null);
 
   // Random Matchmaking States
-  const [opName, setOpName] = useState("يبحث...");
+  const [opName, setOpName] = useState(() => t(loadSettings().lang, "searching"));
   const [searching, setSearching] = useState(false);
   const [mmSecs, setMmSecs] = useState(0);
 
@@ -342,7 +358,7 @@ export default function App() {
 
   useEffect(() => {
     if (mode === "online-room" && screen === "game" && roomPlayers.length > 0 && roomPlayers.length < gameOrder.length) {
-       setDiscoMsg("غادر أحد اللاعبين الغرفة. لا يمكن إكمال المباراة.");
+       setDiscoMsg(T("playerLeftRoom"));
     }
   }, [roomPlayers, mode, screen, gameOrder]);
 
@@ -383,7 +399,7 @@ export default function App() {
 
   const handleRestart = () => {
     handleRestartLocal();
-    addChatMsg("النظام", "🔄 اللعبة بدأت من جديد", "sys", "sys");
+    addChatMsg(T("system"), T("gameRestarted"), "sys", "sys");
   };
 
   const handleClick = (nodeId) => {
@@ -456,11 +472,11 @@ export default function App() {
   //  ONLINE: RANDOM 1V1
   // ═══════════════════════════════════════════════════════
   const saveAndSearchRandom = async () => {
-    const nm = myName.trim() || "لاعب";
+    const nm = myName.trim() || T("defaultPlayer");
     setMyName(nm); localStorage.setItem("gr_name", nm);
     const newId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     setMyId(newId);
-    setSearching(true); setMmSecs(0); setOpName("يبحث...");
+    setSearching(true); setMmSecs(0); setOpName(T("searching"));
     setScreen("mm");
 
     mmInterval.current = setInterval(() => setMmSecs(s => s + 1), 1000);
@@ -518,17 +534,20 @@ export default function App() {
       .on('broadcast', { event: 'rst' }, () => handleRestart())
       .on('broadcast', { event: 'webrtc' }, msg => onWebRTC(msg))
       .on('broadcast', { event: 'bye' }, msg => {
-        const nm = msg.payload?.name || "الخصم";
-        addChatMsg("النظام", `⚠️ ${nm} غادر اللعبة`, "sys", "sys");
-        setDiscoMsg(`${nm} غادر اللعبة`);
+        const nm = msg.payload?.name || T("opponent");
+        addChatMsg(T("system"), Tf("playerLeft", { name: nm }), "sys", "sys");
+        setDiscoMsg(Tf("playerLeftShort", { name: nm }));
       })
       .on('broadcast', { event: 'rst_req' }, msg => setRestartReqFrom(msg.payload.name))
       .on('broadcast', { event: 'rst_ack' }, () => {
-        handleRestart(); addChatMsg("النظام", "🔄 الخصم وافق! تمت إعادة اللعبة.", "sys", "sys");
+        handleRestart(); addChatMsg(T("system"), T("opponentAcceptedRestart"), "sys", "sys");
       });
 
     await ch.subscribe();
-    addChatMsg("النظام", `🎮 ${myCol==='green'?localName:opponentName} (🟢) vs ${myCol==='red'?localName:opponentName} (🔴) — ابدأ اللعب!`, "sys", "sys");
+    addChatMsg(T("system"), Tf("gameStartMsg", {
+      green: myCol === "green" ? localName : opponentName,
+      red: myCol === "red" ? localName : opponentName,
+    }), "sys", "sys");
     setScreen("game");
   };
 
@@ -536,7 +555,7 @@ export default function App() {
   //  ONLINE: PRIVATE ROOM (2v2 / 1v1)
   // ═══════════════════════════════════════════════════════
   const initPrivateRoom = async (code) => {
-    const nm = myName.trim() || "لاعب";
+    const nm = myName.trim() || T("defaultPlayer");
     setMyName(nm); localStorage.setItem("gr_name", nm);
     const newId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     setMyId(newId);
@@ -573,7 +592,7 @@ export default function App() {
       handleRestartLocal();
       setTurnIndex(0);
       setScreen("game");
-      addChatMsg("النظام", "🎮 بدأت اللعبة في الغرفة الخاصة!", "sys", "sys");
+      addChatMsg(T("system"), T("roomGameStarted"), "sys", "sys");
     })
     .on('broadcast', { event: 'mv_room' }, msg => {
       if (msg.payload.from !== newId) { // Apply move if not sender
@@ -597,7 +616,7 @@ export default function App() {
       if (msg.payload.name !== nm) setRestartReqFrom(msg.payload.name);
     })
     .on('broadcast', { event: 'rst_ack_room' }, () => {
-      handleRestart(); addChatMsg("النظام", "🔄 تمت الموافقة وإعادة اللعبة.", "sys", "sys");
+      handleRestart(); addChatMsg(T("system"), T("restartAccepted"), "sys", "sys");
     });
 
     await ch.subscribe(async (st) => {
@@ -613,13 +632,13 @@ export default function App() {
   };
 
   const joinRoom = () => {
-    if (joinCodeInp.trim().length < 3) return alert("الرمز غير صحيح");
+    if (joinCodeInp.trim().length < 3) return alert(T("invalidCode"));
     initPrivateRoom(joinCodeInp.trim().toUpperCase());
   };
 
   const startRoomGame = () => {
     if (roomPlayers.length !== 2 && roomPlayers.length !== 4) {
-      alert("يجب أن يكون عدد اللاعبين 2 أو 4 لبدء اللعبة");
+      alert(T("need2or4Players"));
       return;
     }
     const order = [];
@@ -658,10 +677,10 @@ export default function App() {
   const reqRestart = () => {
     if (mode === 'online' && gameChRef.current) {
       gameChRef.current.send({ type: 'broadcast', event: 'rst_req', payload: { name: myName } });
-      addChatMsg("النظام", "⏳ بانتظار موافقة الخصم على إعادة اللعبة...", "sys", "sys");
+      addChatMsg(T("system"), T("waitingOpponentRestart"), "sys", "sys");
     } else if (mode === 'online-room' && roomChRef.current) {
       roomChRef.current.send({ type: 'broadcast', event: 'rst_req_room', payload: { name: myName } });
-      addChatMsg("النظام", "⏳ بانتظار موافقة الجميع على إعادة اللعبة...", "sys", "sys");
+      addChatMsg(T("system"), T("waitingAllRestart"), "sys", "sys");
     } else {
       handleRestart();
     }
@@ -706,7 +725,7 @@ export default function App() {
            if (gameChRef.current) gameChRef.current.send({ type: 'broadcast', event: 'webrtc', payload: { t: 'req' } });
         }
       } catch (e) {
-        alert('❌ تعذّر الوصول للميكروفون');
+        alert(T('micDenied'));
       }
     } else {
       stopVoice();
@@ -843,13 +862,26 @@ export default function App() {
   // ══════════════════════════════════════════════════════
   //  RENDERS
   // ══════════════════════════════════════════════════════
+  if (screen === "settings") return (
+    <SettingsScreen
+      settings={settings}
+      onUpdate={setSettings}
+      onBack={() => setScreen("menu")}
+      T={T}
+    />
+  );
+
+  if (screen === "stats") return (
+    <StatsScreen onBack={() => setScreen("menu")} T={T} lang={lang} />
+  );
+
   if (screen === "menu") return (
     <div style={S.root}>
       <style>{CSS}</style>
-      <div style={S.menuWrap} className="fadeIn">
+      <div style={{ ...S.menuWrap, direction: dir }} className="fadeIn">
         <div style={S.logo}>⚽</div>
         <h1 style={S.title}>Line Game</h1>
-        <p style={S.sub}>استراتيجية · لعب جماعي · صوت ودردشة</p>
+        <p style={S.sub}>{T("appTagline")}</p>
         <p style={{color:"#4caf50", fontSize:11, fontWeight:700, marginBottom:18, letterSpacing:1}}>Developed by Mustafa Majed</p>
 
         {/* Pi Network Status Card */}
@@ -867,9 +899,9 @@ export default function App() {
             boxShadow: "0 8px 32px rgba(224, 176, 25, 0.15)",
           }}>
             <span style={{ fontSize: 24 }}>⚡</span>
-            <div style={{ textAlign: "right", flex: 1, direction: "rtl" }}>
-              <div style={{ color: "#ffd700", fontWeight: 900, fontSize: 13 }}>متصل بـ Pi Network</div>
-              <div style={{ color: "#aaa", fontSize: 11, marginTop: 2 }}>مرحباً بك، @{piUser.username}</div>
+            <div style={{ textAlign: dir === "rtl" ? "right" : "left", flex: 1, direction: dir }}>
+              <div style={{ color: "#ffd700", fontWeight: 900, fontSize: 13 }}>{T("piConnected")}</div>
+              <div style={{ color: "#aaa", fontSize: 11, marginTop: 2 }}>{Tf("piWelcome", { username: piUser.username })}</div>
             </div>
           </div>
         ) : (
@@ -887,9 +919,9 @@ export default function App() {
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, width: "100%" }}>
               <span style={{ fontSize: 24, opacity: 0.6 }}>🟣</span>
-              <div style={{ textAlign: "right", flex: 1, direction: "rtl" }}>
-                <div style={{ color: "#ccc", fontWeight: 700, fontSize: 13 }}>بيئة Pi Network</div>
-                <div style={{ color: "#777", fontSize: 11, marginTop: 2 }}>قم بتشغيل اللعبة داخل متصفح Pi لتفعيل الميزات الخاصة</div>
+              <div style={{ textAlign: dir === "rtl" ? "right" : "left", flex: 1, direction: dir }}>
+                <div style={{ color: "#ccc", fontWeight: 700, fontSize: 13 }}>{T("piEnv")}</div>
+                <div style={{ color: "#777", fontSize: 11, marginTop: 2 }}>{T("piEnvHint")}</div>
               </div>
             </div>
             <button
@@ -909,33 +941,38 @@ export default function App() {
                 transition: "all 0.2s"
               }}
             >
-              🔑 تسجيل الدخول باستخدام Pi Network
+              {T("piLogin")}
             </button>
           </div>
         )}
 
         <div style={S.card}>
-          <div style={S.cardHint}>اختر وضع اللعب الأونلاين</div>
+          <div style={{ ...S.cardHint, direction: dir }}>{T("onlineModes")}</div>
           <button style={{...S.modeBtn, background:"linear-gradient(135deg,#0d47a1,#1565c0)"}} className="modeBtn" onClick={() => setScreen("setup")}>
             <span style={{fontSize:28}}>🌍</span>
-            <div><div style={S.mBtnT}>مباراة عشوائية (1v1)</div><div style={S.mBtnS}>ابحث عن خصم عشوائي</div></div>
+            <div style={{ direction: dir }}><div style={{ ...S.mBtnT, direction: dir }}>{T("randomMatch")}</div><div style={{ ...S.mBtnS, direction: dir }}>{T("randomMatchSub")}</div></div>
           </button>
           <button style={{...S.modeBtn, background:"linear-gradient(135deg,#e65100,#ef6c00)"}} className="modeBtn" onClick={() => setScreen("setup-room")}>
             <span style={{fontSize:28}}>🏠</span>
-            <div><div style={S.mBtnT}>غرفة خاصة (أصدقاء)</div><div style={S.mBtnS}>العب 2v2 أو 1v1 مع أصدقائك بكود</div></div>
+            <div style={{ direction: dir }}><div style={{ ...S.mBtnT, direction: dir }}>{T("privateRoom")}</div><div style={{ ...S.mBtnS, direction: dir }}>{T("privateRoomSub")}</div></div>
           </button>
         </div>
 
         <div style={{...S.card, marginTop:0}}>
-          <div style={S.cardHint}>أوفلاين (بدون إنترنت)</div>
+          <div style={{ ...S.cardHint, direction: dir }}>{T("offlineModes")}</div>
           <button style={{...S.modeBtn, background:"linear-gradient(135deg,#1b5e20,#2e7d32)"}} className="modeBtn" onClick={() => startGameLocal('pvp')}>
             <span style={{fontSize:24}}>👥</span>
-            <div><div style={S.mBtnT}>لاعبان — نفس الجهاز</div></div>
+            <div style={{ direction: dir }}><div style={{ ...S.mBtnT, direction: dir }}>{T("twoPlayersLocal")}</div></div>
           </button>
           <button style={{...S.modeBtn, background:"linear-gradient(135deg,#4a148c,#6a1b9a)"}} className="modeBtn" onClick={() => startPvcGame('pvc-g')}>
             <span style={{fontSize:24}}>🤖</span>
-            <div><div style={S.mBtnT}>أنت ضد الكمبيوتر</div></div>
+            <div style={{ direction: dir }}><div style={{ ...S.mBtnT, direction: dir }}>{T("vsComputer")}</div></div>
           </button>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, width: "100%", marginTop: 4 }}>
+          <button className="btn-gray" style={{ flex: 1 }} onClick={() => setScreen("settings")}>⚙️ {T("settings")}</button>
+          <button className="btn-gray" style={{ flex: 1 }} onClick={() => setScreen("stats")}>📊 {T("stats")}</button>
         </div>
       </div>
     </div>
@@ -945,41 +982,41 @@ export default function App() {
   if (screen === "difficulty") return (
     <div style={S.root}>
       <style>{CSS}</style>
-      <div style={S.menuWrap} className="fadeIn">
+      <div style={{ ...S.menuWrap, direction: dir }} className="fadeIn">
         <div style={{fontSize:52, marginBottom:8, filter:"drop-shadow(0 0 20px rgba(150,100,255,0.6))"}}>🤖</div>
-        <h1 style={{color:"#fff", fontSize:"clamp(22px,5vw,32px)", fontWeight:900, margin:"0 0 6px", textShadow:"0 0 25px rgba(150,100,255,0.5)"}}>اختر مستوى الصعوبة</h1>
-        <p style={{color:"#88a", fontSize:13, margin:"0 0 28px", textAlign:"center"}}>تؤثر الصعوبة على ذكاء الكمبيوتر وعمق تفكيره</p>
+        <h1 style={{color:"#fff", fontSize:"clamp(22px,5vw,32px)", fontWeight:900, margin:"0 0 6px", textShadow:"0 0 25px rgba(150,100,255,0.5)"}}>{T("chooseDifficulty")}</h1>
+        <p style={{color:"#88a", fontSize:13, margin:"0 0 28px", textAlign:"center"}}>{T("difficultyHint")}</p>
 
         <div style={{...S.card, gap:16}}>
           <button style={{...S.modeBtn, background:"linear-gradient(135deg,#1b5e20,#388e3c)", border:"1px solid rgba(76,175,80,0.3)"}} className="modeBtn" onClick={() => confirmDifficulty("easy")}>
             <span style={{fontSize:30}}>😊</span>
-            <div>
-              <div style={S.mBtnT}>سهل</div>
-              <div style={S.mBtnS}>الكمبيوتر يتحرك عشوائياً — مناسب للمبتدئين</div>
+            <div style={{ direction: dir }}>
+              <div style={{ ...S.mBtnT, direction: dir }}>{T("easy")}</div>
+              <div style={{ ...S.mBtnS, direction: dir }}>{T("easySub")}</div>
             </div>
-            <span style={{marginRight:"auto", fontSize:11, color:"#81c784", fontWeight:700, background:"rgba(76,175,80,0.15)", padding:"4px 10px", borderRadius:20}}>EASY</span>
+            <span style={{marginInlineStart:"auto", fontSize:11, color:"#81c784", fontWeight:700, background:"rgba(76,175,80,0.15)", padding:"4px 10px", borderRadius:20}}>EASY</span>
           </button>
 
           <button style={{...S.modeBtn, background:"linear-gradient(135deg,#e65100,#f57c00)", border:"1px solid rgba(255,152,0,0.3)"}} className="modeBtn" onClick={() => confirmDifficulty("medium")}>
             <span style={{fontSize:30}}>🎯</span>
-            <div>
-              <div style={S.mBtnT}>متوسط</div>
-              <div style={S.mBtnS}>الكمبيوتر يفكر باعتدال — تحدٍّ جيد</div>
+            <div style={{ direction: dir }}>
+              <div style={{ ...S.mBtnT, direction: dir }}>{T("medium")}</div>
+              <div style={{ ...S.mBtnS, direction: dir }}>{T("mediumSub")}</div>
             </div>
-            <span style={{marginRight:"auto", fontSize:11, color:"#ffb74d", fontWeight:700, background:"rgba(255,152,0,0.15)", padding:"4px 10px", borderRadius:20}}>MED</span>
+            <span style={{marginInlineStart:"auto", fontSize:11, color:"#ffb74d", fontWeight:700, background:"rgba(255,152,0,0.15)", padding:"4px 10px", borderRadius:20}}>MED</span>
           </button>
 
           <button style={{...S.modeBtn, background:"linear-gradient(135deg,#b71c1c,#c62828)", border:"1px solid rgba(244,67,54,0.3)"}} className="modeBtn" onClick={() => confirmDifficulty("hard")}>
             <span style={{fontSize:30}}>💀</span>
-            <div>
-              <div style={S.mBtnT}>صعب</div>
-              <div style={S.mBtnS}>الكمبيوتر يفكر عمياً — للمحترفين فقط</div>
+            <div style={{ direction: dir }}>
+              <div style={{ ...S.mBtnT, direction: dir }}>{T("hard")}</div>
+              <div style={{ ...S.mBtnS, direction: dir }}>{T("hardSub")}</div>
             </div>
-            <span style={{marginRight:"auto", fontSize:11, color:"#ef9a9a", fontWeight:700, background:"rgba(244,67,54,0.15)", padding:"4px 10px", borderRadius:20}}>HARD</span>
+            <span style={{marginInlineStart:"auto", fontSize:11, color:"#ef9a9a", fontWeight:700, background:"rgba(244,67,54,0.15)", padding:"4px 10px", borderRadius:20}}>HARD</span>
           </button>
         </div>
 
-        <button className="btn-gray" onClick={() => setScreen("menu")}>← رجوع للقائمة</button>
+        <button className="btn-gray" onClick={() => setScreen("menu")}>{T("backToMenu")}</button>
       </div>
     </div>
   );
@@ -987,15 +1024,15 @@ export default function App() {
   if (screen === "setup") return (
     <div style={S.root}>
       <style>{CSS}</style>
-      <div style={S.menuWrap} className="fadeIn">
+      <div style={{ ...S.menuWrap, direction: dir }} className="fadeIn">
         <div style={{fontSize:46,marginBottom:10}}>🌍</div>
-        <h1 style={{fontSize:24,color:"#fff",fontWeight:900,marginBottom:6}}>مباراة عشوائية</h1>
+        <h1 style={{fontSize:24,color:"#fff",fontWeight:900,marginBottom:6}}>{T("randomMatch")}</h1>
         <div style={S.card}>
-          <label style={S.lbl}>اسمك في اللعبة</label>
-          <input className="inp" value={myName} onChange={e=>setMyName(e.target.value)} placeholder="أدخل اسمك..." maxLength="16"/>
+          <label style={{ ...S.lbl, textAlign: dir === "rtl" ? "right" : "left" }}>{T("yourName")}</label>
+          <input className="inp" value={myName} onChange={e=>setMyName(e.target.value)} placeholder={T("enterName")} maxLength="16"/>
           <div style={{display:"flex",gap:10,marginTop:14,justifyContent:"center"}}>
-            <button className="btn-blue" onClick={saveAndSearchRandom}>🔍 بحث عن خصم</button>
-            <button className="btn-gray" onClick={()=>setScreen("menu")}>← رجوع</button>
+            <button className="btn-blue" onClick={saveAndSearchRandom}>{T("searchOpponent")}</button>
+            <button className="btn-gray" onClick={()=>setScreen("menu")}>{T("back")}</button>
           </div>
         </div>
       </div>
@@ -1005,25 +1042,25 @@ export default function App() {
   if (screen === "setup-room") return (
     <div style={S.root}>
       <style>{CSS}</style>
-      <div style={S.menuWrap} className="fadeIn">
+      <div style={{ ...S.menuWrap, direction: dir }} className="fadeIn">
         <div style={{fontSize:46,marginBottom:10}}>🏠</div>
-        <h1 style={{fontSize:24,color:"#fff",fontWeight:900,marginBottom:6}}>الغرف الخاصة</h1>
-        <p style={{color:"#888",fontSize:12,marginBottom:20}}>أنشئ غرفة والعب 2v2 مع أصدقائك</p>
+        <h1 style={{fontSize:24,color:"#fff",fontWeight:900,marginBottom:6}}>{T("privateRooms")}</h1>
+        <p style={{color:"#888",fontSize:12,marginBottom:20}}>{T("privateRoomsSub")}</p>
 
         <div style={S.card}>
-          <label style={S.lbl}>اسمك في اللعبة</label>
-          <input className="inp" value={myName} onChange={e=>setMyName(e.target.value)} placeholder="أدخل اسمك..." maxLength="16" style={{marginBottom:15}}/>
+          <label style={{ ...S.lbl, textAlign: dir === "rtl" ? "right" : "left" }}>{T("yourName")}</label>
+          <input className="inp" value={myName} onChange={e=>setMyName(e.target.value)} placeholder={T("enterName")} maxLength="16" style={{marginBottom:15}}/>
           
-          <button className="btn-blue" onClick={createRoom} style={{background:"linear-gradient(135deg,#e65100,#ef6c00)"}}>✨ إنشاء غرفة جديدة</button>
+          <button className="btn-blue" onClick={createRoom} style={{background:"linear-gradient(135deg,#e65100,#ef6c00)"}}>{T("createRoom")}</button>
           
-          <div style={{textAlign:"center", color:"#666", margin:"10px 0", fontSize:12}}>أو الانضمام لغرفة</div>
+          <div style={{textAlign:"center", color:"#666", margin:"10px 0", fontSize:12}}>{T("orJoinRoom")}</div>
           
           <div style={{display:"flex", gap:8}}>
-            <input className="inp" value={joinCodeInp} onChange={e=>setJoinCodeInp(e.target.value)} placeholder="كود الغرفة..." style={{flex:1, textAlign:'center', letterSpacing:2, textTransform:'uppercase'}} maxLength="6"/>
-            <button className="btn-blue" onClick={joinRoom}>دخول</button>
+            <input className="inp" value={joinCodeInp} onChange={e=>setJoinCodeInp(e.target.value)} placeholder={T("roomCodePlaceholder")} style={{flex:1, textAlign:'center', letterSpacing:2, textTransform:'uppercase'}} maxLength="6"/>
+            <button className="btn-blue" onClick={joinRoom}>{T("join")}</button>
           </div>
         </div>
-        <button className="btn-gray" onClick={()=>setScreen("menu")}>← رجوع للقائمة</button>
+        <button className="btn-gray" onClick={()=>setScreen("menu")}>{T("backToMenu")}</button>
       </div>
     </div>
   );
@@ -1034,51 +1071,50 @@ export default function App() {
     return (
       <div style={S.root}>
         <style>{CSS}</style>
-        <div style={S.menuWrap} className="fadeIn">
+        <div style={{ ...S.menuWrap, direction: dir }} className="fadeIn">
           <div style={{background:"rgba(255,255,255,0.05)", padding:"15px 30px", borderRadius:15, border:"1px dashed rgba(255,255,255,0.2)", marginBottom:20, textAlign:'center'}}>
-            <div style={{fontSize:12, color:"#888", marginBottom:5}}>كود الغرفة الخاصة بك</div>
+            <div style={{fontSize:12, color:"#888", marginBottom:5}}>{T("yourRoomCode")}</div>
             <div style={{fontSize:36, fontWeight:900, letterSpacing:6, color:"#ffb300"}}>{roomCode}</div>
-            <div style={{fontSize:11, color:"#666", marginTop:5}}>شارك هذا الكود مع أصدقائك للانضمام ({roomPlayers.length}/4)</div>
+            <div style={{fontSize:11, color:"#666", marginTop:5}}>{Tf("shareRoomCode", { count: roomPlayers.length })}</div>
           </div>
 
           <div style={{...S.card, width:"100%"}}>
-            <div style={S.cardHint}>اللاعبون في الغرفة</div>
+            <div style={{ ...S.cardHint, direction: dir }}>{T("playersInRoom")}</div>
             <div style={{display:'flex', flexDirection:'column', gap:8}}>
               {roomPlayers.map((p, i) => (
                 <div key={p.id} style={{display:'flex', alignItems:'center', padding:"10px 15px", background:"rgba(0,0,0,0.2)", borderRadius:10}}>
-                  <div style={{marginRight:'auto', fontSize:14, fontWeight:700, color: i%2===0?'#4caf50':'#f44336'}}>
-                    {i===0 ? '👑 ' : ''}{p.name} {p.id === myId ? '(أنت)' : ''}
+                  <div style={{marginInlineStart:'auto', fontSize:14, fontWeight:700, color: i%2===0?'#4caf50':'#f44336'}}>
+                    {i===0 ? '👑 ' : ''}{p.name} {p.id === myId ? T("you") : ''}
                   </div>
-                  <div style={{fontSize:11, color:'#888'}}>فريق {i%2===0?'الأخضر':'الأحمر'}</div>
+                  <div style={{fontSize:11, color:'#888'}}>{i%2===0 ? T("teamGreen") : T("teamRed")}</div>
                 </div>
               ))}
               {roomPlayers.length < 4 && (
                 <div style={{padding:"10px", textAlign:'center', color:'#555', border:"1px dashed rgba(255,255,255,0.1)", borderRadius:10, fontSize:12}}>
-                  ⏳ بانتظار انضمام البقية...
+                  {T("waitingPlayers")}
                 </div>
               )}
             </div>
             
             {isHost ? (
               <button className="btn-blue" style={{marginTop:15, opacity:canStart?1:0.5}} onClick={startRoomGame}>
-                {roomPlayers.length===4 ? "▶️ ابدأ اللعب (2v2)" : roomPlayers.length===2 ? "▶️ ابدأ اللعب (1v1)" : "تحتاج 2 أو 4 لاعبين للبدء"}
+                {roomPlayers.length===4 ? T("start2v2") : roomPlayers.length===2 ? T("start1v1") : T("needPlayers")}
               </button>
             ) : (
               <div style={{textAlign:'center', marginTop:15, color:'#ffb300', fontSize:13, fontWeight:700}}>
-                ⏳ بانتظار قائد الغرفة لبدء اللعبة...
+                {T("waitingHost")}
               </div>
             )}
           </div>
 
-          {/* Voice bar for Lobby */}
           <div className="voice-bar">
             <button className={`vbtn ${voiceOn?'von':'voff'}`} onClick={toggleVoice}>
-              {voiceOn ? (muted ? '🔇 المايك صامت' : '🎤 المايك يعمل') : '🎤 تشغيل الصوت'}
+              {voiceOn ? (muted ? T('voiceMuted') : T('voiceOn')) : T('voiceEnable')}
             </button>
-            {voiceOn && <button className={`vbtn ${muted?'vmuted':'von'}`} onClick={toggleMute}>{muted?'🔇 كتم':'🔊 كتم'}</button>}
+            {voiceOn && <button className={`vbtn ${muted?'vmuted':'von'}`} onClick={toggleMute}>{muted ? T('mute') : T('mute')}</button>}
           </div>
 
-          <button className="btn-gray" onClick={leaveGame} style={{marginTop:20}}>مغادرة الغرفة</button>
+          <button className="btn-gray" onClick={leaveGame} style={{marginTop:20}}>{T("leaveRoom")}</button>
         </div>
       </div>
     );
@@ -1087,7 +1123,7 @@ export default function App() {
   if (screen === "mm") return (
     <div style={S.root}>
       <style>{CSS}</style>
-      <div style={S.menuWrap} className="fadeIn">
+      <div style={{ ...S.menuWrap, direction: dir }} className="fadeIn">
         <div className="mm-ring">
           <svg width="140" height="140" viewBox="0 0 140 140">
             <defs><linearGradient id="mmg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="#1565c0"/><stop offset="100%" stopColor="#42a5f5"/></linearGradient></defs>
@@ -1097,12 +1133,12 @@ export default function App() {
           <div className="mm-icon mm-icon-anim">{searching ? "⚽" : "✅"}</div>
         </div>
         <div style={{fontSize:18,fontWeight:700,textAlign:"center",color:"#fff",marginTop:10}}>
-          {searching ? "جاري البحث عن خصم عشوائي" : "تم العثور على خصم! 🎉"}
+          {searching ? T("searchingOpponent") : T("opponentFound")}
         </div>
         {searching && <div style={{fontSize:14,color:"#888",fontFamily:"monospace",letterSpacing:2,marginTop:6}}>
           {String(Math.floor(mmSecs/60)).padStart(2,'0')}:{String(mmSecs%60).padStart(2,'0')}
         </div>}
-        <button className="btn-gray" style={{marginTop:30}} onClick={cancelSearch}>✕ إلغاء البحث</button>
+        <button className="btn-gray" style={{marginTop:30}} onClick={cancelSearch}>{T("cancelSearch")}</button>
       </div>
     </div>
   );
@@ -1111,14 +1147,16 @@ export default function App() {
   const isOnlineRoom = mode === "online-room";
   let myTurnStatus = "";
   if (winner) {
-    myTurnStatus = `🏆 ${winner==="green"?"الأخضر":"الأحمر"} يفوز!`;
+    myTurnStatus = winner === "green" ? T("greenWins") : T("redWins");
   } else if (isOnlineRoom) {
     const cp = gameOrder[turnIndex];
-    myTurnStatus = cp.id === myId ? "🎯 دورك — تحرك!" : `⏳ دور ${cp.name} (${cp.color==="green"?"الأخضر":"الأحمر"})...`;
+    myTurnStatus = cp.id === myId
+      ? T("yourTurnMove")
+      : Tf("playerTurn", { name: cp.name, color: cp.color === "green" ? T("colorGreen") : T("colorRed") });
   } else if (mode === "online") {
-    myTurnStatus = turn === myColor ? "🎯 دورك — تحرك!" : "⏳ دور الخصم...";
+    myTurnStatus = turn === myColor ? T("yourTurnMove") : T("opponentTurn");
   } else {
-    myTurnStatus = thinking ? "⏳ الكمبيوتر يفكر..." : `دور ${turn==="green"?"🟢 الأخضر":"🔴 الأحمر"}`;
+    myTurnStatus = thinking ? T("aiThinking") : (turn === "green" ? T("turnGreen") : T("turnRed"));
   }
 
   // Render HUD Cards based on mode
@@ -1130,14 +1168,14 @@ export default function App() {
     const cp = gameOrder[turnIndex];
 
     hudContent = [
-      { team: 'green', colorCode: '#4caf50', title: '🟢 الفريق الأخضر', players: greenTeam, isActive: !winner && turn === 'green' },
-      { team: 'red', colorCode: '#f44336', title: '🔴 الفريق الأحمر', players: redTeam, isActive: !winner && turn === 'red' }
-    ].map(t => (
-      <div key={t.team} style={{...S.hudCard, border:`2px solid ${t.isActive?t.colorCode:"transparent"}`, boxShadow:t.isActive?`0 0 20px ${t.colorCode}33`:"none"}}>
-        <div style={{color:t.colorCode,fontWeight:900,fontSize:14, marginBottom:4}}>{t.title}</div>
-        {t.players.map(p => (
-          <div key={p.id} style={{fontSize:12, color: cp?.id === p.id && t.isActive ? '#fff' : '#aaa', fontWeight: cp?.id === p.id && t.isActive ? 700 : 400}}>
-             {cp?.id === p.id && t.isActive ? '▶️ ' : ''}{p.name} {p.id === myId ? '(أنت)' : ''}
+      { team: 'green', colorCode: '#4caf50', title: T('greenTeam'), players: greenTeam, isActive: !winner && turn === 'green' },
+      { team: 'red', colorCode: '#f44336', title: T('redTeam'), players: redTeam, isActive: !winner && turn === 'red' }
+    ].map(team => (
+      <div key={team.team} style={{...S.hudCard, border:`2px solid ${team.isActive?team.colorCode:"transparent"}`, boxShadow:team.isActive?`0 0 20px ${team.colorCode}33`:"none"}}>
+        <div style={{color:team.colorCode,fontWeight:900,fontSize:14, marginBottom:4}}>{team.title}</div>
+        {team.players.map(p => (
+          <div key={p.id} style={{fontSize:12, color: cp?.id === p.id && team.isActive ? '#fff' : '#aaa', fontWeight: cp?.id === p.id && team.isActive ? 700 : 400}}>
+             {cp?.id === p.id && team.isActive ? '▶️ ' : ''}{p.name} {p.id === myId ? T("you") : ''}
           </div>
         ))}
       </div>
@@ -1148,15 +1186,17 @@ export default function App() {
       const active = turn===c&&!winner&&!thinking;
       const acc = c==="green"?"#4caf50":"#f44336";
       const isMe = mode === "online" && myColor === c;
-      const name = mode === "online" ? (myColor===c?myName:opName) : (c==="green"?"الأخضر":(mode!=="pvp"?"الكمبيوتر":"الأحمر"));
+      const name = mode === "online"
+        ? (myColor === c ? myName : opName)
+        : (c === "green" ? T("colorGreen") : (mode !== "pvp" ? T("computer") : T("colorRed")));
       return (
         <div key={c} style={{...S.hudCard, border:`2px solid ${active?acc:"transparent"}`, boxShadow:active?`0 0 20px ${acc}33`:"none"}}>
           <div style={{color:acc,fontWeight:700,fontSize:13}}>
-            {c==="green"?"🟢":"🔴"} {name} {isMe?"(أنت)":""}
+            {c==="green"?"🟢":"🔴"} {name} {isMe ? T("you") : ""}
           </div>
           {active&&!winner&&(
             <div style={{color:"#aaa",fontSize:10,marginTop:3}} className={(thinking||(mode==="online"&&!isMe))?"blink":""}>
-              {mode==="online" ? (isMe ? "● دورك" : "⏳ الخصم") : (thinking&&c!=="green" ? "يحسب..." : "● دورك")}
+              {mode==="online" ? (isMe ? T("yourTurn") : T("opponentTurn")) : (thinking && c !== "green" && mode !== "pvp" ? T("thinking") : T("yourTurn"))}
             </div>
           )}
         </div>
@@ -1171,12 +1211,12 @@ export default function App() {
   const showTimer = screen === "game" && !winner && !isAiTurn && (mode === "pvp" || mode === "pvc-g" || mode === "pvc-r");
 
   return (
-    <div style={S.root}>
+    <div style={{ ...S.root, direction: dir }}>
       <style>{CSS}</style>
       <audio id="remote-audio" autoPlay style={{display:'none'}}></audio>
 
       <div style={S.topBar}>
-        <button className="btn-gray" style={{padding:"6px 12px",fontSize:11}} onClick={leaveGame}>← مغادرة</button>
+        <button className="btn-gray" style={{padding:"6px 12px",fontSize:11}} onClick={leaveGame}>{T("leave")}</button>
         <span style={S.hTitle}>⚽ Line Game {isOnlineRoom && <span style={{color:'#ffb300', fontSize:12}}>[{roomCode}]</span>}</span>
         <div style={{display:'flex', alignItems:'center', gap:8}}>
           {(mode === "pvc-g" || mode === "pvc-r") && (
@@ -1185,11 +1225,13 @@ export default function App() {
               color: difficulty==="easy"?"#81c784":difficulty==="hard"?"#ef9a9a":"#ffb74d",
               border: `1px solid ${difficulty==="easy"?"rgba(76,175,80,0.3)":difficulty==="hard"?"rgba(244,67,54,0.3)":"rgba(255,152,0,0.3)"}`
             }}>
-              {difficulty==="easy"?"😊 سهل":difficulty==="hard"?"💀 صعب":"🎯 متوسط"}
+              {difficulty==="easy" ? `😊 ${T("easy")}` : difficulty==="hard" ? `💀 ${T("hard")}` : `🎯 ${T("medium")}`}
             </span>
           )}
           <span style={{color:"#888",fontSize:10}}>
-            {isOnlineRoom ? `🌍 غرف ${gameOrder.length===4?'2v2':'1v1'}` : mode==="online"?"🌍 عشوائي":mode==="pvp"?"👥 محلي":"🤖 كمبيوتر"}
+            {isOnlineRoom
+              ? (gameOrder.length === 4 ? T("modeRoom2v2") : T("modeRoom1v1"))
+              : mode === "online" ? T("modeRandom") : mode === "pvp" ? T("modeLocal") : T("modeComputer")}
           </span>
         </div>
       </div>
@@ -1198,7 +1240,7 @@ export default function App() {
       {showTimer && (
         <div style={{width:"100%", maxWidth:740, marginBottom:10, zIndex:10}}>
           <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:5}}>
-            <span style={{fontSize:11, color:"#888", fontWeight:600}}>⏱ الوقت المتبقي</span>
+            <span style={{fontSize:11, color:"#888", fontWeight:600}}>{T("timeLeft")}</span>
             <span style={{fontSize:16, fontWeight:900, color: timerColor, fontFamily:"monospace",
               textShadow: timeLeft <= 3 ? `0 0 15px ${timerColor}` : "none",
               animation: timeLeft <= 3 ? "blink 0.5s ease-in-out infinite" : "none"
@@ -1229,8 +1271,8 @@ export default function App() {
           boxShadow:"0 10px 40px rgba(244,67,54,0.6)",
           animation:"fadeIn 0.2s ease"
         }}>
-          🚫 لقد كررت هذه الحركة 3 مرات بالفعل!
-          <div style={{fontSize:12, fontWeight:400, marginTop:4, opacity:0.85}}>يُمنع تكرار نفس الحركة أكثر من 3 مرات. اختر حركة مختلفة.</div>
+          {T("repeatWarning")}
+          <div style={{fontSize:12, fontWeight:400, marginTop:4, opacity:0.85}}>{T("repeatWarningSub")}</div>
         </div>
       )}
 
@@ -1258,8 +1300,8 @@ export default function App() {
           <rect width={W} height={H} fill="url(#bg)" rx={16}/>
           <rect x={8} y={58} width={118} height={404} rx={10} fill="rgba(76,175,80,0.04)" stroke="rgba(76,175,80,0.22)" strokeWidth={1.5} strokeDasharray="7,5"/>
           <rect x={574} y={58} width={118} height={404} rx={10} fill="rgba(244,67,54,0.04)" stroke="rgba(244,67,54,0.22)" strokeWidth={1.5} strokeDasharray="7,5"/>
-          <text x={67} y={46} textAnchor="middle" fill="rgba(76,175,80,0.4)" fontSize={9}>هدف الأحمر</text>
-          <text x={633} y={46} textAnchor="middle" fill="rgba(244,67,54,0.4)" fontSize={9}>هدف الأخضر</text>
+          <text x={67} y={46} textAnchor="middle" fill="rgba(76,175,80,0.4)" fontSize={9}>{T("redGoalZone")}</text>
+          <text x={633} y={46} textAnchor="middle" fill="rgba(244,67,54,0.4)" fontSize={9}>{T("greenGoalZone")}</text>
 
           {EDGES.map(([a,b],i)=>{
             const na=NODES[a], nb=NODES[b];
@@ -1326,24 +1368,24 @@ export default function App() {
         <>
           <div className="voice-bar">
             <button className={`vbtn ${voiceOn?'von':'voff'}`} onClick={toggleVoice}>
-              {voiceOn ? (muted ? '🔇 المايك صامت' : '🎤 المايك يعمل') : '🎤 تشغيل الصوت'}
+              {voiceOn ? (muted ? T('voiceMuted') : T('voiceOn')) : T('voiceEnable')}
             </button>
-            {voiceOn && <button className={`vbtn ${muted?'vmuted':'von'}`} onClick={toggleMute}>{muted?'🔇 إلغاء الكتم':'🔊 كتم صوتي'}</button>}
+            {voiceOn && <button className={`vbtn ${muted?'vmuted':'von'}`} onClick={toggleMute}>{muted ? T('mute') : T('unmuteSelf')}</button>}
             
             {isOnlineRoom && voiceOn && gameOrder.length === 4 && (
               <button className={`vbtn ${voiceChannel==='team'?'von':'voff'}`} onClick={() => setVoiceChannel(v => v==='all'?'team':'all')}>
-                {voiceChannel==='team' ? '👥 الأصدقاء فقط' : '🌐 الجميع'}
+                {voiceChannel==='team' ? T('teamOnly') : T('everyone')}
               </button>
             )}
 
             {isOnlineRoom ? (
-               <div style={{display:'flex', gap:6, marginRight:'auto'}}>
+               <div style={{display:'flex', gap:6, marginInlineStart:'auto'}}>
                  {Object.keys(peerSpeaking).map(id => peerSpeaking[id] && (
-                    <span key={id} className="peer-vs peer-speaking" style={{padding:"2px 6px"}}>🎤 {roomPlayers.find(p=>p.id===id)?.name || 'صديق'}</span>
+                    <span key={id} className="peer-vs peer-speaking" style={{padding:"2px 6px"}}>🎤 {roomPlayers.find(p=>p.id===id)?.name || T('friend')}</span>
                  ))}
                </div>
             ) : (
-               <span className={`peer-vs ${peerVoice?'peer-speaking':''}`}>الخصم: {peerVoice?'🎤 يتحدث الآن...':'بلا صوت'}</span>
+               <span className={`peer-vs ${peerVoice?'peer-speaking':''}`}>{T('opponentLabel')} {peerVoice ? T('opponentSpeaking') : T('noVoice')}</span>
             )}
           </div>
           
@@ -1359,7 +1401,7 @@ export default function App() {
               <div ref={msgsEndRef} />
             </div>
             <div className="chat-inp-row">
-              <input className="chat-inp" value={chatInp} onChange={e=>setChatInp(e.target.value)} onKeyDown={e=>e.key==='Enter'&&sendChat()} placeholder="اكتب رسالة للمجموعة..." maxLength="100"/>
+              <input className="chat-inp" value={chatInp} onChange={e=>setChatInp(e.target.value)} onKeyDown={e=>e.key==='Enter'&&sendChat()} placeholder={T("chatPlaceholder")} maxLength="100"/>
               <button className="btn-blue" style={{padding:"6px 14px", borderRadius:8}} onClick={sendChat}>←</button>
             </div>
           </div>
@@ -1367,24 +1409,24 @@ export default function App() {
       )}
 
       <div style={{display:"flex",gap:10,marginTop:12,justifyContent:"center"}}>
-        <button className="btn-blue" onClick={reqRestart}>🔄 إعادة اللعبة</button>
-        {(mode !== "online" && !isOnlineRoom) && <button className="btn-gray" onClick={()=>setScreen("menu")}>🏠 القائمة</button>}
+        <button className="btn-blue" onClick={reqRestart}>{T("restartGame")}</button>
+        {(mode !== "online" && !isOnlineRoom) && <button className="btn-gray" onClick={()=>setScreen("menu")}>{T("menu")}</button>}
       </div>
 
       {restartReqFrom && (
         <div className="overlay">
           <div className="overlay-box">
             <div className="overlay-icon">🔄</div>
-            <div className="overlay-title">طلب إعادة اللعبة</div>
-            <div className="overlay-sub">{restartReqFrom} يطلب إعادة اللعبة. هل توافق؟</div>
+            <div className="overlay-title">{T("restartRequest")}</div>
+            <div className="overlay-sub">{Tf("restartRequestSub", { name: restartReqFrom })}</div>
             <div style={{display:"flex",gap:10,justifyContent:"center"}}>
               <button className="btn-blue" onClick={()=>{
                 setRestartReqFrom(null);
                 handleRestart();
                 if(gameChRef.current) gameChRef.current.send({type:'broadcast',event:'rst_ack',payload:{}});
                 if(roomChRef.current) roomChRef.current.send({type:'broadcast',event:'rst_ack_room',payload:{}});
-              }}>✅ أوافق</button>
-              <button className="btn-gray" onClick={()=>setRestartReqFrom(null)}>❌ رفض</button>
+              }}>{T("agree")}</button>
+              <button className="btn-gray" onClick={()=>setRestartReqFrom(null)}>{T("decline")}</button>
             </div>
           </div>
         </div>
@@ -1394,9 +1436,9 @@ export default function App() {
         <div className="overlay">
           <div className="overlay-box">
             <div className="overlay-icon">📡</div>
-            <div className="overlay-title">انقطع الاتصال</div>
+            <div className="overlay-title">{T("disconnected")}</div>
             <div className="overlay-sub">{discoMsg}</div>
-            <button className="btn-gray" onClick={leaveGame}>🏠 العودة للقائمة</button>
+            <button className="btn-gray" onClick={leaveGame}>🏠 {T("backMenu")}</button>
           </div>
         </div>
       )}
