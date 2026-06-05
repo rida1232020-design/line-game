@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "./supabaseClient";
 import { t, tf } from "./i18n.js";
-import { loadSettings } from "./store.js";
+import { loadSettings, recordWin } from "./store.js";
 import SettingsScreen from "./components/SettingsScreen.jsx";
+import WinScreen from "./components/WinScreen.jsx";
 import StatsScreen from "./components/StatsScreen.jsx";
 
 // ═══════════════════════════════════════════════════════
@@ -325,6 +326,13 @@ export default function App() {
   useEffect(() => {
     if (winner) clearInterval(timerRef.current);
   }, [winner]);
+
+  // Record stats on winner
+  useEffect(() => {
+    if (winner) {
+      recordWin(winner, movesCount);
+    }
+  }, [winner, movesCount]);
 
   // Stop timer when leaving game screen
   useEffect(() => {
@@ -908,45 +916,7 @@ export default function App() {
         <p style={S.sub}>{T("appTagline")}</p>
         <p style={{color:"#4caf50", fontSize:11, fontWeight:700, marginBottom:18, letterSpacing:1}}>{T("developerCredit")}</p>
 
-        {/* Pi Network Status Card */}
-        {piUser ? (
-          <div style={{
-            background: "linear-gradient(135deg, rgba(224, 176, 25, 0.15), rgba(184, 134, 11, 0.05))",
-            border: "1px solid rgba(224, 176, 25, 0.3)",
-            borderRadius: 16,
-            padding: "12px 20px",
-            width: "100%",
-            marginBottom: 18,
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            boxShadow: "0 8px 32px rgba(224, 176, 25, 0.15)",
-          }}>
-            <span style={{ fontSize: 24 }}>⚡</span>
-            <div style={{ textAlign: dir === "rtl" ? "right" : "left", flex: 1, direction: dir }}>
-              <div style={{ color: "#ffd700", fontWeight: 900, fontSize: 13 }}>{T("piConnected")}</div>
-              <div style={{ color: "#aaa", fontSize: 11, marginTop: 2 }}>{Tf("piWelcome", { username: piUser.username })}</div>
-            </div>
-          </div>
-        ) : (
-          <div style={{
-            background: "rgba(255, 255, 255, 0.03)",
-            border: "1px solid rgba(255, 255, 255, 0.05)",
-            borderRadius: 16,
-            padding: "16px 20px",
-            width: "100%",
-            marginBottom: 18,
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-          }}>
-            <span style={{ fontSize: 24, opacity: 0.6 }}>🟣</span>
-            <div style={{ textAlign: dir === "rtl" ? "right" : "left", flex: 1, direction: dir }}>
-              <div style={{ color: "#ccc", fontWeight: 700, fontSize: 13 }}>{T("piEnv")}</div>
-              <div style={{ color: "#777", fontSize: 11, marginTop: 2 }}>{T("piEnvHint")}</div>
-            </div>
-          </div>
-        )}
+
 
         <div style={S.card}>
           <div style={{ ...S.cardHint, direction: dir }}>{T("onlineModes")}</div>
@@ -1443,6 +1413,19 @@ export default function App() {
             <button className="btn-gray" onClick={leaveGame}>🏠 {T("backMenu")}</button>
           </div>
         </div>
+      )}
+
+      {winner && (
+        <WinScreen
+          winner={winner}
+          mode={mode}
+          aiColor={aiColor}
+          moveCount={movesCount}
+          onRestart={reqRestart}
+          onMenu={leaveGame}
+          lang={lang}
+          T={T}
+        />
       )}
     </div>
   );
