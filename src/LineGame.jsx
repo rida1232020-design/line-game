@@ -276,6 +276,18 @@ export default function App() {
   // ── Timer Logic ──
   const getTimerDuration = () => Math.max(4, 10 - Math.floor(movesCount / 6));
 
+  const handleTurnTimeout = () => {
+    setSelected(null);
+    setValids([]);
+    setTurn(t => t === "green" ? "red" : "green");
+    if (mode === "online" && gameChRef.current) {
+      gameChRef.current.send({ type: "broadcast", event: "timeout", payload: {} });
+    } else if (mode === "online-room" && roomChRef.current) {
+      roomChRef.current.send({ type: "broadcast", event: "timeout_room", payload: { from: myId, orderLength: gameOrder.length } });
+      setTurnIndex(prev => (prev + 1) % gameOrder.length);
+    }
+  };
+
   const resetTimer = () => {
     clearInterval(timerRef.current);
     const dur = getTimerDuration();
@@ -284,9 +296,7 @@ export default function App() {
       setTimeLeft(prev => {
         if (prev <= 1) {
           clearInterval(timerRef.current);
-          // Time out → lose turn (auto switch)
-          setTurn(t => t === "green" ? "red" : "green");
-          setSelected(null); setValids([]);
+          handleTurnTimeout();
           return getTimerDuration();
         }
         return prev - 1;
@@ -294,16 +304,22 @@ export default function App() {
     }, 1000);
   };
 
+  const isMyTurnForTimer = () => {
+    if (mode === "online") return turn === myColor;
+    if (mode === "online-room") {
+      const cp = gameOrder[turnIndex];
+      return cp && cp.id === myId;
+    }
+    return !isAiTurn;
+  };
+
   // Start/reset timer when turn changes and game is active
   useEffect(() => {
     if (screen !== "game" || winner || thinking) return;
-    // Only apply timer for local/vs-computer modes
-    if (mode === "online" || mode === "online-room") return;
-    // In PVC mode don't run timer on AI turn
-    if (isAiTurn) { clearInterval(timerRef.current); return; }
+    if (!isMyTurnForTimer()) { clearInterval(timerRef.current); return; }
     resetTimer();
     return () => clearInterval(timerRef.current);
-  }, [turn, screen, winner, mode, isAiTurn]);
+  }, [turn, screen, winner, mode, isAiTurn, myColor, turnIndex, gameOrder, myId]);
 
   // Stop timer on winner
   useEffect(() => {
@@ -425,15 +441,11 @@ export default function App() {
     if (nodeId === selected) { setSelected(null); setValids([]); return; }
 
     if (valids.includes(nodeId)) {
-      // Block repetitive back-and-forth moves (local/pvc only)
-      if (mode !== "online" && mode !== "online-room") {
-        if (isRepetitiveMove(selected, nodeId, turn)) {
-          // Show warning by flashing, don't allow move
-          setValids(prev => [...prev]); // trigger re-render to show shake
-          setRepeatWarning(true);
-          setTimeout(() => setRepeatWarning(false), 1000);
-          return;
-        }
+      if (isRepetitiveMove(selected, nodeId, turn)) {
+        setValids(prev => [...prev]);
+        setRepeatWarning(true);
+        setTimeout(() => setRepeatWarning(false), 1000);
+        return;
       }
       handleMove(selected, nodeId);
       
@@ -530,6 +542,11 @@ export default function App() {
     gameChRef.current = ch;
 
     ch.on('broadcast', { event: 'mv' }, msg => handleMove(msg.payload.f, msg.payload.t))
+      .on('broadcast', { event: 'timeout' }, () => {
+        setSelected(null);
+        setValids([]);
+        setTurn(t => t === "green" ? "red" : "green");
+      })
       .on('broadcast', { event: 'chat' }, msg => addChatMsg(msg.payload.name, msg.payload.text, msg.payload.color, 'theirs'))
       .on('broadcast', { event: 'rst' }, () => handleRestart())
       .on('broadcast', { event: 'webrtc' }, msg => onWebRTC(msg))
@@ -599,6 +616,13 @@ export default function App() {
          handleMove(msg.payload.f, msg.payload.t);
          setTurnIndex(prev => (prev + 1) % msg.payload.orderLength);
       }
+    })
+    .on('broadcast', { event: 'timeout_room' }, msg => {
+      if (msg.payload.from === newId) return;
+      setSelected(null);
+      setValids([]);
+      setTurn(t => t === "green" ? "red" : "green");
+      setTurnIndex(prev => (prev + 1) % msg.payload.orderLength);
     })
     .on('broadcast', { event: 'chat_room' }, msg => {
       if (msg.payload.name !== nm) addChatMsg(msg.payload.name, msg.payload.text, msg.payload.color, 'theirs');
@@ -880,9 +904,9 @@ export default function App() {
       <style>{CSS}</style>
       <div style={{ ...S.menuWrap, direction: dir }} className="fadeIn">
         <div style={S.logo}>⚽</div>
-        <h1 style={S.title}>Line Game</h1>
+        <h1 style={S.title}>{T("appName")}</h1>
         <p style={S.sub}>{T("appTagline")}</p>
-        <p style={{color:"#4caf50", fontSize:11, fontWeight:700, marginBottom:18, letterSpacing:1}}>Developed by Mustafa Majed</p>
+        <p style={{color:"#4caf50", fontSize:11, fontWeight:700, marginBottom:18, letterSpacing:1}}>{T("developerCredit")}</p>
 
         {/* Pi Network Status Card */}
         {piUser ? (
@@ -913,36 +937,14 @@ export default function App() {
             width: "100%",
             marginBottom: 18,
             display: "flex",
-            flexDirection: "column",
             alignItems: "center",
             gap: 12,
           }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, width: "100%" }}>
-              <span style={{ fontSize: 24, opacity: 0.6 }}>🟣</span>
-              <div style={{ textAlign: dir === "rtl" ? "right" : "left", flex: 1, direction: dir }}>
-                <div style={{ color: "#ccc", fontWeight: 700, fontSize: 13 }}>{T("piEnv")}</div>
-                <div style={{ color: "#777", fontSize: 11, marginTop: 2 }}>{T("piEnvHint")}</div>
-              </div>
+            <span style={{ fontSize: 24, opacity: 0.6 }}>🟣</span>
+            <div style={{ textAlign: dir === "rtl" ? "right" : "left", flex: 1, direction: dir }}>
+              <div style={{ color: "#ccc", fontWeight: 700, fontSize: 13 }}>{T("piEnv")}</div>
+              <div style={{ color: "#777", fontSize: 11, marginTop: 2 }}>{T("piEnvHint")}</div>
             </div>
-            <button
-              onClick={handlePiAuth}
-              style={{
-                width: "100%",
-                background: "linear-gradient(135deg, #ffd700, #ffb300)",
-                color: "#111",
-                border: "none",
-                borderRadius: 10,
-                padding: "10px 16px",
-                fontWeight: "900",
-                fontSize: 12,
-                cursor: "pointer",
-                fontFamily: "Cairo, sans-serif",
-                boxShadow: "0 4px 15px rgba(255, 215, 0, 0.2)",
-                transition: "all 0.2s"
-              }}
-            >
-              {T("piLogin")}
-            </button>
           </div>
         )}
 
@@ -1208,7 +1210,7 @@ export default function App() {
   const maxTime = getTimerDuration();
   const timerPct = (timeLeft / maxTime) * 100;
   const timerColor = timeLeft <= 3 ? '#f44336' : timeLeft <= 5 ? '#ff9800' : '#4caf50';
-  const showTimer = screen === "game" && !winner && !isAiTurn && (mode === "pvp" || mode === "pvc-g" || mode === "pvc-r");
+  const showTimer = screen === "game" && !winner && !thinking && isMyTurnForTimer();
 
   return (
     <div style={{ ...S.root, direction: dir }}>
@@ -1217,7 +1219,7 @@ export default function App() {
 
       <div style={S.topBar}>
         <button className="btn-gray" style={{padding:"6px 12px",fontSize:11}} onClick={leaveGame}>{T("leave")}</button>
-        <span style={S.hTitle}>⚽ Line Game {isOnlineRoom && <span style={{color:'#ffb300', fontSize:12}}>[{roomCode}]</span>}</span>
+        <span style={S.hTitle}>⚽ {T("appName")} {isOnlineRoom && <span style={{color:'#ffb300', fontSize:12}}>[{roomCode}]</span>}</span>
         <div style={{display:'flex', alignItems:'center', gap:8}}>
           {(mode === "pvc-g" || mode === "pvc-r") && (
             <span style={{fontSize:10, fontWeight:700, padding:"3px 8px", borderRadius:10,

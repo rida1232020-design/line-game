@@ -4,7 +4,7 @@ const STATS_KEY    = "goalrush_stats";
 
 // ── Default values ───────────────────────────────────────────────────────────
 const defaultSettings = {
-  lang:       "ar",     // "ar" | "en"
+  lang:       "en",     // "ar" | "en"
   sound:      true,     // boolean
   difficulty: "medium", // "easy" | "medium" | "hard"
 };

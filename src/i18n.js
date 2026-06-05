@@ -4,6 +4,7 @@ export const translations = {
     appName:        "سباق الأقراص",
     appSub:         "استراتيجية — أوصل قطعك الثلاث إلى منطقة الخصم",
     appTagline:     "استراتيجية · لعب جماعي · صوت ودردشة",
+    developerCredit:"طوّرها مصطفى ماجد",
     chooseMode:     "اختر وضع اللعب",
     pvp:            "لاعبان",
     pvpSub:         "على نفس الجهاز",
@@ -124,8 +125,7 @@ export const translations = {
     piConnected:    "متصل بـ Pi Network",
     piWelcome:      "مرحباً بك، @{username}",
     piEnv:          "بيئة Pi Network",
-    piEnvHint:      "قم بتشغيل اللعبة داخل متصفح Pi لتفعيل الميزات الخاصة",
-    piLogin:        "🔑 تسجيل الدخول باستخدام Pi Network",
+    piEnvHint:      "يتم التحقق من الهوية تلقائياً عبر منصة Pi",
     // Game HUD
     yourTurnMove:   "🎯 دورك — تحرك!",
     opponentTurn:   "⏳ دور الخصم...",
@@ -162,9 +162,10 @@ export const translations = {
     colorRed:       "الأحمر",
   },
   en: {
-    appName:        "Goal Rush",
+    appName:        "Line Game",
     appSub:         "Strategy — Move your 3 pieces to the opponent's zone",
     appTagline:     "Strategy · Multiplayer · Voice & Chat",
+    developerCredit:"Developed by Mustafa Majed",
     chooseMode:     "Choose Game Mode",
     pvp:            "Two Players",
     pvpSub:         "On the same device",
@@ -285,8 +286,7 @@ export const translations = {
     piConnected:    "Connected to Pi Network",
     piWelcome:      "Welcome, @{username}",
     piEnv:          "Pi Network Environment",
-    piEnvHint:      "Run the game inside the Pi Browser to enable special features",
-    piLogin:        "🔑 Sign in with Pi Network",
+    piEnvHint:      "Identity is verified automatically through the Pi platform",
     // Game HUD
     yourTurnMove:   "🎯 Your turn — move!",
     opponentTurn:   "⏳ Opponent's turn...",
@@ -325,7 +325,7 @@ export const translations = {
 };
 
 export function t(lang, key) {
-  return translations[lang]?.[key] ?? translations["ar"][key] ?? key;
+  return translations[lang]?.[key] ?? translations["en"][key] ?? translations["ar"][key] ?? key;
 }
 
 /** Replace {var} placeholders in a translated string */
