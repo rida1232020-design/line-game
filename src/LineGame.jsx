@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "./supabaseClient";
 import { t, tf } from "./i18n.js";
-import { loadSettings, recordWin } from "./store.js";
+import { loadSettings, recordWin, loadStats, addCoins, SKINS } from "./store.js";
 import SettingsScreen from "./components/SettingsScreen.jsx";
 import WinScreen from "./components/WinScreen.jsx";
 import StatsScreen from "./components/StatsScreen.jsx";
+import RewardsScreen from "./components/RewardsScreen.jsx";
+import { Sounds } from "./sounds.js";
 
 // ═══════════════════════════════════════════════════════
 //  BOARD
@@ -117,6 +119,8 @@ function getBestMove(board, aiColor, depth = 3) {
 // ═══════════════════════════════════════════════════════
 export default function App() {
   const [settings, setSettings] = useState(loadSettings);
+  const [stats, setStats] = useState(loadStats);
+  const [coinsAwarded, setCoinsAwarded] = useState(0);
   const lang = settings.lang;
   const dir = lang === "ar" ? "rtl" : "ltr";
   const T = useCallback((key) => t(lang, key), [lang]);
@@ -327,10 +331,68 @@ export default function App() {
     if (winner) clearInterval(timerRef.current);
   }, [winner]);
 
-  // Record stats on winner
+  // Record stats and award coins on winner
   useEffect(() => {
     if (winner) {
       recordWin(winner, movesCount);
+      
+      // Calculate coins to award
+      let coinsToAward = 0;
+      if (mode === "pvc-g" || mode === "pvc-r") {
+        // AI game
+        const playerColor = mode === "pvc-g" ? "green" : "red";
+        if (winner === playerColor) {
+          // Player won
+          if (difficulty === "easy") coinsToAward = 15;
+          else if (difficulty === "medium") coinsToAward = 30;
+          else if (difficulty === "hard") coinsToAward = 50;
+        } else {
+          // AI won (consolation prize)
+          coinsToAward = 5;
+        }
+      } else if (mode === "pvp") {
+        // Local 1v1
+        coinsToAward = 10;
+      } else if (mode === "online") {
+        // Online 1v1
+        if (winner === myColor) {
+          coinsToAward = 40;
+        } else {
+          coinsToAward = 15;
+        }
+      } else if (mode === "online-room") {
+        // Private room 1v1 or 2v2
+        const myPlayer = gameOrder.find(p => p.id === myId);
+        const myTeamColor = myPlayer ? myPlayer.color : null;
+        if (winner === myTeamColor) {
+          coinsToAward = 40;
+        } else {
+          coinsToAward = 15;
+        }
+      }
+
+      if (coinsToAward > 0) {
+        const updatedStats = addCoins(coinsToAward);
+        setStats(updatedStats);
+        setCoinsAwarded(coinsToAward);
+      } else {
+        setStats(loadStats());
+      }
+
+      // Play win or lose sound
+      if (settings.sound) {
+        if (mode === "pvc-g" || mode === "pvc-r") {
+          const playerColor = mode === "pvc-g" ? "green" : "red";
+          if (winner === playerColor) {
+            Sounds.win();
+          } else {
+            Sounds.lose();
+          }
+        } else {
+          // PvP or Online win
+          Sounds.win();
+        }
+      }
     }
   }, [winner, movesCount]);
 
@@ -412,6 +474,7 @@ export default function App() {
     setLastMove({ from: f, to: t });
     setMovesCount(c => c+1);
     setSelected(null); setValids([]);
+    if (settings.sound) Sounds.move();
   };
 
   const handleRestartLocal = () => {
@@ -419,6 +482,7 @@ export default function App() {
     setWinner(null); setMovesCount(0); setLastMove(null); setThinking(false); setDiscoMsg("");
     setTurnIndex(0); moveHistoryRef.current = [];
     clearInterval(timerRef.current);
+    setCoinsAwarded(0);
   };
 
   const handleRestart = () => {
@@ -442,11 +506,20 @@ export default function App() {
     const piece = board[nodeId];
 
     if (selected === null) {
-      if (piece === turn) { setSelected(nodeId); setValids(getValidMoves(board, nodeId)); }
+      if (piece === turn) {
+        setSelected(nodeId);
+        setValids(getValidMoves(board, nodeId));
+        if (settings.sound) Sounds.select();
+      }
       return;
     }
 
-    if (nodeId === selected) { setSelected(null); setValids([]); return; }
+    if (nodeId === selected) {
+      setSelected(null);
+      setValids([]);
+      if (settings.sound) Sounds.deselect();
+      return;
+    }
 
     if (valids.includes(nodeId)) {
       if (isRepetitiveMove(selected, nodeId, turn)) {
@@ -466,9 +539,16 @@ export default function App() {
       return;
     }
 
-    if (piece === turn) { setSelected(nodeId); setValids(getValidMoves(board, nodeId)); return; }
+    if (piece === turn) {
+      setSelected(nodeId);
+      setValids(getValidMoves(board, nodeId));
+      if (settings.sound) Sounds.select();
+      return;
+    }
 
-    setSelected(null); setValids([]);
+    setSelected(null);
+    setValids([]);
+    if (settings.sound) Sounds.deselect();
   };
 
   // Repeat warning state
@@ -891,9 +971,23 @@ export default function App() {
     }
   };
 
+  const activeSkinId = stats.activeSkin || "classic";
+  const activeSkin = SKINS.find(s => s.id === activeSkinId) || SKINS[0];
+
   // ══════════════════════════════════════════════════════
   //  RENDERS
   // ══════════════════════════════════════════════════════
+  if (screen === "rewards") return (
+    <RewardsScreen
+      onBack={() => setScreen("menu")}
+      T={T}
+      lang={lang}
+      stats={stats}
+      onUpdateStats={setStats}
+      sound={settings.sound}
+    />
+  );
+
   if (screen === "settings") return (
     <SettingsScreen
       settings={settings}
@@ -911,6 +1005,31 @@ export default function App() {
     <div style={S.root}>
       <style>{CSS}</style>
       <div style={{ ...S.menuWrap, direction: dir }} className="fadeIn">
+        {/* Gems Balance pill in top right/left of the menu */}
+        <div style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          width: "100%",
+          marginBottom: 14,
+          padding: "0 4px"
+        }}>
+          <div style={{ color: "#666", fontSize: 11 }}>{piUser ? `@${piUser.username}` : ""}</div>
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            background: "rgba(255, 215, 0, 0.08)",
+            border: "1px solid rgba(255, 215, 0, 0.2)",
+            padding: "5px 12px",
+            borderRadius: 20,
+            boxShadow: "0 0 10px rgba(255,215,0,0.05)"
+          }}>
+            <span style={{ fontSize: 13 }}>💎</span>
+            <span style={{ color: "#ffd700", fontWeight: 800, fontSize: 12 }}>{stats.coins || 0}</span>
+          </div>
+        </div>
+
         <div style={S.logo}>⚽</div>
         <h1 style={S.title}>{T("appName")}</h1>
         <p style={S.sub}>{T("appTagline")}</p>
@@ -944,6 +1063,7 @@ export default function App() {
 
         <div style={{ display: "flex", gap: 10, width: "100%", marginTop: 4 }}>
           <button className="btn-gray" style={{ flex: 1 }} onClick={() => setScreen("settings")}>⚙️ {T("settings")}</button>
+          <button className="btn-gray" style={{ flex: 1 }} onClick={() => setScreen("rewards")}>🏆 {T("rewards")}</button>
           <button className="btn-gray" style={{ flex: 1 }} onClick={() => setScreen("stats")}>📊 {T("stats")}</button>
         </div>
       </div>
@@ -1257,9 +1377,8 @@ export default function App() {
             {NODES.map(n=>{
               const pc=board[n.id]; if(!pc) return null;
               const sel=selected===n.id; const isWin=winner&&pc===winner;
-              const c=pc==="green"
-                ? sel?["#c8e6c9","#1b5e20"]:isWin?["#a5d6a7","#2e7d32"]:["#69bb6e","#1a4a1a"]
-                : sel?["#ffcdd2","#7f0000"]:isWin?["#ef9a9a","#b71c1c"]:["#ef5350","#5a0000"];
+              const skinPart = pc === "green" ? activeSkin.green : activeSkin.red;
+              const c = sel ? skinPart.selected : isWin ? skinPart.win : skinPart.normal;
               return (
                 <radialGradient key={`gr${n.id}`} id={`gr${n.id}`} cx="33%" cy="28%" r="70%">
                   <stop offset="0%" stopColor={c[0]}/>
@@ -1301,7 +1420,7 @@ export default function App() {
             const sel=selected===node.id; const isVM=valids.includes(node.id);
             const isLT=lastMove?.to===node.id; const isWin=!!winner&&pc===winner;
             const R=pc?22:9;
-            const stroke = pc ? (sel||isWin ? "#ffd700" : pc==="green" ? "#4caf50" : "#f44336") : "rgba(255,255,255,0.13)";
+            const stroke = pc ? (sel||isWin ? "#ffd700" : (pc === "green" ? activeSkin.green.accent : activeSkin.red.accent)) : "rgba(255,255,255,0.13)";
             const sw = sel||isWin ? 3 : 2;
             const filt = sel?"url(#sglow)":isWin?"url(#glow)":isLT?"url(#glow)":"none";
             
@@ -1325,6 +1444,11 @@ export default function App() {
                 <circle cx={node.x} cy={node.y} r={R} fill={pc?`url(#gr${node.id})`:"rgba(255,255,255,0.03)"} stroke={stroke} strokeWidth={sw} filter={filt} className={isWin?"winb":""}/>
                 {pc&&<circle cx={node.x-6} cy={node.y-6} r={5} fill="rgba(255,255,255,0.28)"/>}
                 {!pc&&<circle cx={node.x} cy={node.y} r={2.5} fill="rgba(255,255,255,0.18)"/>}
+                {pc && activeSkinId !== "classic" && (
+                  <text x={node.x} y={node.y + 4} textAnchor="middle" fontSize={14} style={{ pointerEvents: "none", filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.6))" }}>
+                    {pc === "green" ? activeSkin.green.emoji : activeSkin.red.emoji}
+                  </text>
+                )}
                 {sel&&<circle cx={node.x} cy={node.y} r={R+7} fill="none" stroke="rgba(255,215,0,0.4)" strokeWidth={2} strokeDasharray="5,3" className="spinr"/>}
               </g>
             );
@@ -1425,6 +1549,8 @@ export default function App() {
           onMenu={leaveGame}
           lang={lang}
           T={T}
+          coinsAwarded={coinsAwarded}
+          activeSkin={activeSkinId}
         />
       )}
     </div>

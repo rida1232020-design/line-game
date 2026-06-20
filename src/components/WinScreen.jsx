@@ -1,15 +1,17 @@
 import Confetti from "./Confetti.jsx";
+import { SKINS } from "../store.js";
 
 // ── Win / Game Over Screen ───────────────────────────────────────────────────
-export default function WinScreen({ winner, mode, aiColor, moveCount, onRestart, onMenu, lang, T }) {
+export default function WinScreen({ winner, mode, aiColor, moveCount, onRestart, onMenu, lang, T, coinsAwarded = 0, activeSkin = "classic" }) {
   const isHuman   = !aiColor;
   const playerWon = aiColor && winner !== aiColor; // human beat AI
   const aiWon     = aiColor && winner === aiColor; // AI beat human
 
-  const winnerColor = winner === "green" ? "#4caf50" : "#f44336";
-  const winnerGlow  = winner === "green"
-    ? "0 0 60px rgba(76,175,80,0.5)"
-    : "0 0 60px rgba(244,67,54,0.5)";
+  const currentSkin = SKINS.find(s => s.id === activeSkin) || SKINS[0];
+  const winnerSkinPart = winner === "green" ? currentSkin.green : currentSkin.red;
+
+  const winnerColor = winnerSkinPart.accent;
+  const winnerGlow  = `0 0 60px ${winnerColor}80`;
 
   let headline, sub;
   if (isHuman) {
@@ -67,7 +69,7 @@ export default function WinScreen({ winner, mode, aiColor, moveCount, onRestart,
 
           {/* Piece emoji */}
           <div style={{ fontSize: 56, marginBottom: 6, lineHeight: 1 }}>
-            {winner === "green" ? "🟢" : "🔴"}
+            {winnerSkinPart.emoji}
           </div>
 
           {/* Headline */}
@@ -86,9 +88,30 @@ export default function WinScreen({ winner, mode, aiColor, moveCount, onRestart,
           </h2>
 
           {/* Move count */}
-          <div style={{ color: "#888", fontSize: 13, marginBottom: 22, fontFamily: "'Cairo',sans-serif" }}>
+          <div style={{ color: "#888", fontSize: 13, marginBottom: coinsAwarded > 0 ? 14 : 22, fontFamily: "'Cairo',sans-serif" }}>
             {sub}
           </div>
+
+          {/* Gems Awarded Card */}
+          {coinsAwarded > 0 && (
+            <div style={{
+              background: "rgba(255, 215, 0, 0.06)",
+              border: "1px solid rgba(255, 215, 0, 0.2)",
+              borderRadius: 16,
+              padding: "10px 20px",
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              marginBottom: 22,
+              boxShadow: "0 4px 15px rgba(255, 215, 0, 0.05)"
+            }}>
+              <span style={{ fontSize: 24 }}>💎</span>
+              <div style={{ textAlign: lang === "ar" ? "right" : "left" }}>
+                <div style={{ color: "#ffd700", fontWeight: 900, fontSize: 15 }}>+{coinsAwarded} Gems</div>
+                <div style={{ color: "#888", fontSize: 10, marginTop: 1 }}>{T("coinsEarnedSub")}</div>
+              </div>
+            </div>
+          )}
 
           {/* Buttons */}
           <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%" }}>
