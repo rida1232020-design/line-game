@@ -86,7 +86,7 @@ export default function RewardsScreen({ onBack, T, lang, stats, onUpdateStats, s
     }
   };
 
-  // ── Pi Network Payment Flow ────────────────────────────────────────────────
+  // ── Pi Network Payment Flow ──────────────────────────────────────────────────
   const handleBuyGemsWithPi = async () => {
     playClick();
     
@@ -128,7 +128,11 @@ export default function RewardsScreen({ onBack, T, lang, stats, onUpdateStats, s
           });
           
           if (!response.ok) {
-            throw new Error("Backend payment approval failed.");
+            // Extract detailed error from backend
+            let errMsg = "Backend approval failed";
+            try { const j = await response.json(); errMsg = j.error || errMsg; } catch {}
+            console.error("Backend approval error:", response.status, errMsg);
+            throw new Error(errMsg);
           }
           console.log("Payment approved successfully on backend.");
         },
@@ -147,7 +151,11 @@ export default function RewardsScreen({ onBack, T, lang, stats, onUpdateStats, s
           });
           
           if (!response.ok) {
-            throw new Error("Backend payment completion failed.");
+            // Extract detailed error from backend
+            let errMsg = "Backend completion failed";
+            try { const j = await response.json(); errMsg = j.error || errMsg; } catch {}
+            console.error("Backend completion error:", response.status, errMsg);
+            throw new Error(errMsg);
           }
           console.log("Payment completed successfully on backend.");
           
@@ -167,7 +175,12 @@ export default function RewardsScreen({ onBack, T, lang, stats, onUpdateStats, s
         
         onError: (error, payment) => {
           console.error("Payment error:", error, payment);
-          setMsg({ text: (lang === "ar" ? "فشلت عملية الدفع: " : "Payment failed: ") + (error.message || "Error"), isError: true });
+          // Check for the common sandbox scope error
+          const errText = error?.message || error?.toString() || "Error";
+          const userMsg = errText.includes("payments")
+            ? (lang === "ar" ? "خطأ: لم يتم طلب صلاحية الدفع عند تسجيل الدخول" : "Error: payments scope not requested at auth")
+            : (lang === "ar" ? "فشلت عملية الدفع: " : "Payment failed: ") + errText;
+          setMsg({ text: userMsg, isError: true });
           setIsPurchasing(false);
         }
       };

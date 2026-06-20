@@ -227,16 +227,36 @@ export default function App() {
     }
   };
 
+  // ── Handle incomplete/pending Pi payments from previous sessions ──
+  const handleIncompletePayment = async (payment) => {
+    console.log("Incomplete payment found, completing on backend:", payment);
+    try {
+      // Try to complete the payment server-side
+      await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/pi-payment`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+        },
+        body: JSON.stringify({ action: "complete", paymentId: payment.identifier, txid: payment.transaction?.txid })
+      });
+    } catch (e) {
+      console.warn("Could not auto-complete incomplete payment:", e);
+    }
+  };
+
   const handlePiAuth = async () => {
     if (!window.Pi) {
       console.warn("Pi SDK not found (make sure you are running inside Pi Browser).");
       return;
     }
     try {
-      console.log("Initializing Pi SDK as Promise...");
+      const isSandbox = import.meta.env.VITE_PI_SANDBOX === "true" || import.meta.env.VITE_PI_SANDBOX === true;
+      console.log("Initializing Pi SDK... sandbox:", isSandbox);
+
       await new Promise((resolve, reject) => {
         try {
-          const res = window.Pi.init({ version: "2.0", sandbox: true });
+          const res = window.Pi.init({ version: "2.0", sandbox: isSandbox });
           if (res && typeof res.then === 'function') {
             res.then(resolve).catch(reject);
           } else {
@@ -248,15 +268,12 @@ export default function App() {
       });
 
       console.log("Pi SDK initialized. Authenticating...");
-      const scopes = ["username"];
-      const onIncompletePaymentFound = (payment) => {
-        console.log("Incomplete payment found:", payment);
-      };
+      // ✅ IMPORTANT: "payments" scope is REQUIRED for Pi.createPayment to work
+      const scopes = ["username", "payments"];
 
-      const auth = await window.Pi.authenticate(scopes, onIncompletePaymentFound);
-      console.log("Pi authenticated successfully. Access token:", auth.accessToken);
+      const auth = await window.Pi.authenticate(scopes, handleIncompletePayment);
+      console.log("Pi authenticated successfully.");
 
-      console.log("Validating access token on backend...");
       const validationResult = await validatePiTokenWithBackend(auth.accessToken);
       console.log("Backend validation successful:", validationResult);
 
