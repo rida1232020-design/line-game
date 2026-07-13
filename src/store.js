@@ -18,6 +18,8 @@ const defaultStats = {
   unlockedSkins: ["classic"],
   activeSkin:  "classic",
   lastDailyClaim: 0,
+  entryTickets: 0,
+  unusedTicketIds: [],
 };
 
 // ── Skins Configuration ──────────────────────────────────────────────────────
@@ -45,7 +47,7 @@ export const SKINS = [
   {
     id: "gold",
     nameKey: "skinGold",
-    price: 150,
+    price: 2500,
     emoji: "👑💎",
     green: {
       normal: ["#ffd700", "#e6c200"], // Golden
@@ -65,7 +67,7 @@ export const SKINS = [
   {
     id: "cyber",
     nameKey: "skinCyber",
-    price: 300,
+    price: 4000,
     emoji: "🔮👾",
     green: {
       normal: ["#ea80fc", "#4a148c"], // Cyber Purple
@@ -85,7 +87,7 @@ export const SKINS = [
   {
     id: "soccer",
     nameKey: "skinSoccer",
-    price: 500,
+    price: 6000,
     emoji: "⚽🏆",
     green: {
       normal: ["#ffffff", "#7f7f7f"], // Soccer ball white-gray
@@ -204,6 +206,27 @@ export function claimDailyReward() {
     return { success: true, amount: 50, stats };
   }
   return { success: false, stats };
+}
+
+// ── Match Tickets Management ──────────────────────────────────────────────────
+export function addTickets(amount, paymentId) {
+  const stats = loadStats();
+  stats.entryTickets = (stats.entryTickets || 0) + amount;
+  if (paymentId) {
+    stats.unusedTicketIds = [...(stats.unusedTicketIds || []), paymentId];
+  }
+  saveStats(stats);
+  return stats;
+}
+
+export function consumeTicket() {
+  const stats = loadStats();
+  const unused = stats.unusedTicketIds || [];
+  const ticketId = unused.length > 0 ? unused.shift() : null;
+  stats.entryTickets = Math.max(0, (stats.entryTickets || 0) - 1);
+  stats.unusedTicketIds = unused;
+  saveStats(stats);
+  return { success: true, ticketId, stats };
 }
 
 // ── Difficulty → AI depth ────────────────────────────────────────────────────

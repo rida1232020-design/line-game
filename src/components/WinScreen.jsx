@@ -2,7 +2,7 @@ import Confetti from "./Confetti.jsx";
 import { SKINS } from "../store.js";
 
 // ── Win / Game Over Screen ───────────────────────────────────────────────────
-export default function WinScreen({ winner, mode, aiColor, moveCount, onRestart, onMenu, lang, T, coinsAwarded = 0, activeSkin = "classic" }) {
+export default function WinScreen({ winner, mode, aiColor, moveCount, onRestart, onMenu, lang, T, coinsAwarded = 0, activeSkin = "classic", payoutStatus = "" }) {
   const isHuman   = !aiColor;
   const playerWon = aiColor && winner !== aiColor; // human beat AI
   const aiWon     = aiColor && winner === aiColor; // AI beat human
@@ -88,7 +88,7 @@ export default function WinScreen({ winner, mode, aiColor, moveCount, onRestart,
           </h2>
 
           {/* Move count */}
-          <div style={{ color: "#888", fontSize: 13, marginBottom: coinsAwarded > 0 ? 14 : 22, fontFamily: "'Cairo',sans-serif" }}>
+          <div style={{ color: "#888", fontSize: 13, marginBottom: coinsAwarded > 0 || payoutStatus ? 14 : 22, fontFamily: "'Cairo',sans-serif" }}>
             {sub}
           </div>
 
@@ -102,13 +102,60 @@ export default function WinScreen({ winner, mode, aiColor, moveCount, onRestart,
               display: "flex",
               alignItems: "center",
               gap: 12,
-              marginBottom: 22,
-              boxShadow: "0 4px 15px rgba(255, 215, 0, 0.05)"
+              marginBottom: payoutStatus ? 12 : 22,
+              boxShadow: "0 4px 15px rgba(255, 215, 0, 0.05)",
+              width: "100%",
+              boxSizing: "border-box"
             }}>
               <span style={{ fontSize: 24 }}>💎</span>
-              <div style={{ textAlign: lang === "ar" ? "right" : "left" }}>
+              <div style={{ textAlign: lang === "ar" ? "right" : "left", flex: 1 }}>
                 <div style={{ color: "#ffd700", fontWeight: 900, fontSize: 15 }}>+{coinsAwarded} Gems</div>
                 <div style={{ color: "#888", fontSize: 10, marginTop: 1 }}>{T("coinsEarnedSub")}</div>
+              </div>
+            </div>
+          )}
+
+          {/* Payout Status Card */}
+          {payoutStatus && (
+            <div style={{
+              background: payoutStatus === "success" 
+                ? "rgba(76,175,80,0.06)" 
+                : payoutStatus === "processing" 
+                ? "rgba(255, 179, 0, 0.06)" 
+                : "rgba(244,67,54,0.06)",
+              border: `1px solid ${
+                payoutStatus === "success" 
+                  ? "rgba(76,175,80,0.22)" 
+                  : payoutStatus === "processing" 
+                  ? "rgba(255, 179, 0, 0.22)" 
+                  : "rgba(244,67,54,0.22)"
+              }`,
+              borderRadius: 16,
+              padding: "10px 20px",
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              marginBottom: 22,
+              boxShadow: "0 4px 15px rgba(0,0,0,0.1)",
+              width: "100%",
+              boxSizing: "border-box"
+            }}>
+              <span style={{ fontSize: 24 }}>
+                {payoutStatus === "success" ? "🎉" : payoutStatus === "processing" ? "⏳" : "❌"}
+              </span>
+              <div style={{ textAlign: lang === "ar" ? "right" : "left", flex: 1 }}>
+                <div style={{ 
+                  color: payoutStatus === "success" ? "#81c784" : payoutStatus === "processing" ? "#ffb74d" : "#ef9a9a", 
+                  fontWeight: 800, 
+                  fontSize: 12,
+                  lineHeight: 1.3 
+                }}>
+                  {payoutStatus === "success" 
+                    ? T("payoutSuccess") 
+                    : payoutStatus === "processing" 
+                    ? T("payoutProcessing") 
+                    : T("payoutFailed")}
+                </div>
               </div>
             </div>
           )}

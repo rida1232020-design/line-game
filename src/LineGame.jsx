@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "./supabaseClient";
 import { t, tf } from "./i18n.js";
-import { loadSettings, recordWin, loadStats, addCoins, SKINS } from "./store.js";
+import { loadSettings, recordWin, loadStats, addCoins, SKINS, addTickets, consumeTicket } from "./store.js";
 import SettingsScreen from "./components/SettingsScreen.jsx";
 import WinScreen from "./components/WinScreen.jsx";
 import StatsScreen from "./components/StatsScreen.jsx";
@@ -163,6 +163,18 @@ export default function App() {
   const [piUser, setPiUser] = useState(null);
   const [piAuth, setPiAuth] = useState(null);
 
+  // Match Ticket States
+  const [showTicketPrompt, setShowTicketPrompt] = useState(false);
+  const [ticketPromptMode, setTicketPromptMode] = useState(""); // "random" | "create-room" | "join-room"
+  const [isBuyingTicket, setIsBuyingTicket] = useState(false);
+  const [ticketMsg, setTicketMsg] = useState("");
+  const [ticketError, setTicketError] = useState(false);
+  const [payoutStatus, setPayoutStatus] = useState(""); // "" | "processing" | "success" | "failed"
+
+  const myActiveTicketId = useRef(null);
+  const opponentActiveTicketId = useRef(null);
+  const roomTickets = useRef({}); // { player_id: payment_id }
+
   // Random Matchmaking States
   const [opName, setOpName] = useState(() => t(loadSettings().lang, "searching"));
   const [searching, setSearching] = useState(false);
@@ -196,6 +208,182 @@ export default function App() {
   const mmInterval = useRef(null);
   const mmBcast = useRef(null);
   const msgsEndRef = useRef(null);
+
+  // ── Match Ticket Purchase & Payout Functions ──
+  const handleBuyTicketWithPi = async () => {
+    if (settings.sound) Sounds.click();
+    
+    if (!window.Pi) {
+      console.warn("Pi SDK not detected. Simulating ticket purchase...");
+      setIsBuyingTicket(true);
+      setTicketMsg(T("processingTicket") || "Processing Ticket...");
+      setTimeout(() => {
+        const fakePaymentId = "fake_ticket_" + Math.random().toString(36).substring(2, 10);
+        const updatedStats = addTickets(1, fakePaymentId);
+        setStats(updatedStats);
+        if (settings.sound) Sounds.win();
+        setIsBuyingTicket(false);
+        setTicketMsg("");
+        setShowTicketPrompt(false);
+        if (ticketPromptMode === "random") {
+          saveAndSearchRandom();
+        } else if (ticketPromptMode === "create-room") {
+          createRoom();
+        } else if (ticketPromptMode === "join-room") {
+          joinRoom();
+        }
+      }, 1500);
+      return;
+    }
+
+    setIsBuyingTicket(true);
+    setTicketMsg(T("processingTicket") || "Processing Ticket...");
+    setTicketError(false);
+    try {
+      const paymentData = {
+        amount: 2.0,
+        memo: "Purchase 1 Match Ticket - Goal Rush",
+        metadata: { type: "match_ticket" },
+      };
+
+      const callbacks = {
+        onReadyForServerApproval: async (paymentId) => {
+          console.log("Ready for server approval. Ticket PaymentId:", paymentId);
+          const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/pi-payment`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+            },
+            body: JSON.stringify({ action: "approve", paymentId })
+          });
+          
+          if (!response.ok) {
+            let errMsg = "Backend approval failed";
+            try { const j = await response.json(); errMsg = j.error || errMsg; } catch {}
+            throw new Error(errMsg);
+          }
+          console.log("Ticket payment approved on backend.");
+        },
+        
+        onReadyForServerCompletion: async (paymentId, txid) => {
+          console.log("Ready for server completion. Ticket PaymentId:", paymentId, "TxId:", txid);
+          const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/pi-payment`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+            },
+            body: JSON.stringify({ action: "complete", paymentId, txid })
+          });
+          
+          if (!response.ok) {
+            let errMsg = "Backend completion failed";
+            try { const j = await response.json(); errMsg = j.error || errMsg; } catch {}
+            throw new Error(errMsg);
+          }
+          console.log("Ticket payment completed on backend.");
+          
+          const updatedStats = addTickets(1, paymentId);
+          setStats(updatedStats);
+          if (settings.sound) Sounds.win();
+          
+          setIsBuyingTicket(false);
+          setTicketMsg("");
+          setShowTicketPrompt(false);
+          
+          if (ticketPromptMode === "random") {
+            saveAndSearchRandom();
+          } else if (ticketPromptMode === "create-room") {
+            createRoom();
+          } else if (ticketPromptMode === "join-room") {
+            joinRoom();
+          }
+        },
+        
+        onCancel: (paymentId) => {
+          setTicketMsg(lang === "ar" ? "تم إلغاء عملية الدفع." : "Payment cancelled.");
+          setTicketError(true);
+          setIsBuyingTicket(false);
+        },
+        
+        onError: (error, payment) => {
+          const errText = error?.message || error?.toString() || "Error";
+          const userMsg = errText.includes("payments")
+            ? (lang === "ar" ? "خطأ: لم يتم طلب صلاحية الدفع عند تسجيل الدخول" : "Error: payments scope not requested at auth")
+            : (lang === "ar" ? "فشلت عملية الدفع: " : "Payment failed: ") + errText;
+          setTicketMsg(userMsg);
+          setTicketError(true);
+          setIsBuyingTicket(false);
+        }
+      };
+
+      window.Pi.createPayment(paymentData, callbacks);
+    } catch (err) {
+      setTicketMsg(lang === "ar" ? "فشل بدء الدفع." : "Payment initialization failed.");
+      setTicketError(true);
+      setIsBuyingTicket(false);
+    }
+  };
+
+  const triggerPayout = async () => {
+    if (!window.Pi || !piUser) {
+      console.warn("Pi SDK or User not present. Simulating payout...");
+      setPayoutStatus("processing");
+      setTimeout(() => {
+        setPayoutStatus("success");
+      }, 2000);
+      return;
+    }
+
+    setPayoutStatus("processing");
+    try {
+      let paymentIds = [];
+      if (mode === "online") {
+        if (myActiveTicketId.current) paymentIds.push(myActiveTicketId.current);
+        if (opponentActiveTicketId.current) paymentIds.push(opponentActiveTicketId.current);
+      } else if (mode === "online-room") {
+        gameOrder.forEach(p => {
+          if (p.id === myId && myActiveTicketId.current) {
+            paymentIds.push(myActiveTicketId.current);
+          } else {
+            const tk = roomTickets.current[p.id];
+            if (tk) paymentIds.push(tk);
+          }
+        });
+      }
+
+      console.log("Submitting payment IDs for payout verification:", paymentIds);
+      const gameId = roomCode || "g_rand_" + Date.now().toString(36);
+
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/pi-payment`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+        },
+        body: JSON.stringify({
+          action: "payout",
+          gameId,
+          winnerUid: piUser.uid,
+          paymentIds
+        })
+      });
+
+      if (!response.ok) {
+        let errMsg = "Payout API failed";
+        try { const j = await response.json(); errMsg = j.error || errMsg; } catch {}
+        console.error("Payout failed:", errMsg);
+        setPayoutStatus("failed");
+      } else {
+        console.log("Payout processed successfully!");
+        setPayoutStatus("success");
+      }
+    } catch (e) {
+      console.error("Error during payout request:", e);
+      setPayoutStatus("failed");
+    }
+  };
 
   const aiColor = mode === "pvc-g" ? "red" : mode === "pvc-r" ? "green" : null;
   const isAiTurn = !!aiColor && turn === aiColor && !winner;
@@ -374,6 +562,7 @@ export default function App() {
         // Online 1v1
         if (winner === myColor) {
           coinsToAward = 40;
+          triggerPayout();
         } else {
           coinsToAward = 15;
         }
@@ -383,6 +572,7 @@ export default function App() {
         const myTeamColor = myPlayer ? myPlayer.color : null;
         if (winner === myTeamColor) {
           coinsToAward = 40;
+          triggerPayout();
         } else {
           coinsToAward = 15;
         }
@@ -589,6 +779,13 @@ export default function App() {
   //  ONLINE: RANDOM 1V1
   // ═══════════════════════════════════════════════════════
   const saveAndSearchRandom = async () => {
+    if ((stats.entryTickets || 0) <= 0) {
+      setTicketPromptMode("random");
+      setTicketMsg("");
+      setTicketError(false);
+      setShowTicketPrompt(true);
+      return;
+    }
     const nm = myName.trim() || T("defaultPlayer");
     setMyName(nm); localStorage.setItem("gr_name", nm);
     const newId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -642,11 +839,32 @@ export default function App() {
   const joinSession = async (gid, myCol, opponentName, localName) => {
     setMyColor(myCol); setOpName(opponentName); setMode("online");
     setDiscoMsg(""); setChatMsgs([]); handleRestartLocal();
+    setPayoutStatus("");
+
+    // Consume ticket
+    const consumeRes = consumeTicket();
+    myActiveTicketId.current = consumeRes.ticketId;
+    opponentActiveTicketId.current = null;
+    setStats(consumeRes.stats);
+    console.log("Consumed match ticket:", consumeRes.ticketId);
 
     const ch = supabase.channel('gs-' + gid, { config: { broadcast: { self: false } } });
     gameChRef.current = ch;
 
     ch.on('broadcast', { event: 'mv' }, msg => handleMove(msg.payload.f, msg.payload.t))
+      .on('broadcast', { event: 'ticket_ex' }, msg => {
+        console.log("Received opponent ticket ID via ex:", msg.payload.paymentId);
+        opponentActiveTicketId.current = msg.payload.paymentId;
+        ch.send({
+          type: "broadcast",
+          event: "ticket_ex_reply",
+          payload: { paymentId: myActiveTicketId.current }
+        });
+      })
+      .on('broadcast', { event: 'ticket_ex_reply' }, msg => {
+        console.log("Received opponent ticket ID via reply:", msg.payload.paymentId);
+        opponentActiveTicketId.current = msg.payload.paymentId;
+      })
       .on('broadcast', { event: 'timeout' }, () => {
         setSelected(null);
         setValids([]);
@@ -665,7 +883,15 @@ export default function App() {
         handleRestart(); addChatMsg(T("system"), T("opponentAcceptedRestart"), "sys", "sys");
       });
 
-    await ch.subscribe();
+    await ch.subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        ch.send({
+          type: "broadcast",
+          event: "ticket_ex",
+          payload: { paymentId: myActiveTicketId.current }
+        });
+      }
+    });
     addChatMsg(T("system"), Tf("gameStartMsg", {
       green: myCol === "green" ? localName : opponentName,
       red: myCol === "red" ? localName : opponentName,
@@ -714,7 +940,35 @@ export default function App() {
       handleRestartLocal();
       setTurnIndex(0);
       setScreen("game");
+      setPayoutStatus("");
       addChatMsg(T("system"), T("roomGameStarted"), "sys", "sys");
+
+      // Consume ticket
+      const consumeRes = consumeTicket();
+      myActiveTicketId.current = consumeRes.ticketId;
+      roomTickets.current = {};
+      setStats(consumeRes.stats);
+      console.log("Consumed private room match ticket:", consumeRes.ticketId);
+
+      // Share our ticket ID
+      ch.send({
+        type: "broadcast",
+        event: "ticket_room_ex",
+        payload: { fromId: newId, paymentId: myActiveTicketId.current }
+      });
+    })
+    .on('broadcast', { event: 'ticket_room_ex' }, msg => {
+      console.log(`Received player ${msg.payload.fromId} ticket:`, msg.payload.paymentId);
+      roomTickets.current[msg.payload.fromId] = msg.payload.paymentId;
+      // Reply
+      ch.send({
+        type: "broadcast",
+        event: "ticket_room_ex_reply",
+        payload: { fromId: newId, paymentId: myActiveTicketId.current }
+      });
+    })
+    .on('broadcast', { event: 'ticket_room_ex_reply' }, msg => {
+      roomTickets.current[msg.payload.fromId] = msg.payload.paymentId;
     })
     .on('broadcast', { event: 'mv_room' }, msg => {
       if (msg.payload.from !== newId) { // Apply move if not sender
@@ -756,12 +1010,26 @@ export default function App() {
   };
 
   const createRoom = () => {
+    if ((stats.entryTickets || 0) <= 0) {
+      setTicketPromptMode("create-room");
+      setTicketMsg("");
+      setTicketError(false);
+      setShowTicketPrompt(true);
+      return;
+    }
     const code = Math.random().toString(36).substring(2, 6).toUpperCase();
     initPrivateRoom(code);
   };
 
   const joinRoom = () => {
     if (joinCodeInp.trim().length < 3) return alert(T("invalidCode"));
+    if ((stats.entryTickets || 0) <= 0) {
+      setTicketPromptMode("join-room");
+      setTicketMsg("");
+      setTicketError(false);
+      setShowTicketPrompt(true);
+      return;
+    }
     initPrivateRoom(joinCodeInp.trim().toUpperCase());
   };
 
@@ -1022,7 +1290,7 @@ export default function App() {
     <div style={S.root}>
       <style>{CSS}</style>
       <div style={{ ...S.menuWrap, direction: dir }} className="fadeIn">
-        {/* Gems Balance pill in top right/left of the menu */}
+        {/* Balance pills in top right/left of the menu */}
         <div style={{
           display: "flex",
           justifyContent: "space-between",
@@ -1032,18 +1300,35 @@ export default function App() {
           padding: "0 4px"
         }}>
           <div style={{ color: "#666", fontSize: 11 }}>{piUser ? `@${piUser.username}` : ""}</div>
-          <div style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            background: "rgba(255, 215, 0, 0.08)",
-            border: "1px solid rgba(255, 215, 0, 0.2)",
-            padding: "5px 12px",
-            borderRadius: 20,
-            boxShadow: "0 0 10px rgba(255,215,0,0.05)"
-          }}>
-            <span style={{ fontSize: 13 }}>💎</span>
-            <span style={{ color: "#ffd700", fontWeight: 800, fontSize: 12 }}>{stats.coins || 0}</span>
+          <div style={{ display: "flex", gap: 8 }}>
+            {/* Gems pill */}
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              background: "rgba(255, 215, 0, 0.08)",
+              border: "1px solid rgba(255, 215, 0, 0.2)",
+              padding: "5px 12px",
+              borderRadius: 20,
+              boxShadow: "0 0 10px rgba(255,215,0,0.05)"
+            }}>
+              <span style={{ fontSize: 13 }}>💎</span>
+              <span style={{ color: "#ffd700", fontWeight: 800, fontSize: 12 }}>{stats.coins || 0}</span>
+            </div>
+            {/* Tickets pill */}
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              background: "rgba(33, 150, 243, 0.08)",
+              border: "1px solid rgba(33, 150, 243, 0.2)",
+              padding: "5px 12px",
+              borderRadius: 20,
+              boxShadow: "0 0 10px rgba(33,150,243,0.05)"
+            }}>
+              <span style={{ fontSize: 13 }}>🎟️</span>
+              <span style={{ color: "#2196f3", fontWeight: 800, fontSize: 12 }}>{stats.entryTickets || 0}</span>
+            </div>
           </div>
         </div>
 
@@ -1568,7 +1853,60 @@ export default function App() {
           T={T}
           coinsAwarded={coinsAwarded}
           activeSkin={activeSkinId}
+          payoutStatus={payoutStatus}
         />
+      )}
+
+      {showTicketPrompt && (
+        <div className="overlay" style={{ zIndex: 1100 }}>
+          <div className="overlay-box" style={{ padding: "30px 24px", maxWidth: 360 }}>
+            <div style={{ fontSize: 54, marginBottom: 12 }}>🎟️</div>
+            <div className="overlay-title">{T("ticketRequired")}</div>
+            <div className="overlay-sub" style={{ fontSize: 13, color: "#aaa", lineHeight: 1.5, margin: "10px 0 24px" }}>
+              {T("ticketDesc")}
+            </div>
+            
+            {ticketMsg && (
+              <div style={{
+                background: ticketError ? "rgba(244,67,54,0.1)" : "rgba(33,150,243,0.1)",
+                border: `1px solid ${ticketError ? "rgba(244,67,54,0.3)" : "rgba(33,150,243,0.3)"}`,
+                color: ticketError ? "#ff8a80" : "#90caf9",
+                borderRadius: 12,
+                padding: "10px 14px",
+                fontSize: 12,
+                marginBottom: 18,
+                textAlign: "center"
+              }}>
+                {ticketMsg}
+              </div>
+            )}
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%" }}>
+              <button 
+                className="btn-blue" 
+                onClick={handleBuyTicketWithPi}
+                disabled={isBuyingTicket}
+                style={{
+                  background: "linear-gradient(135deg,#1565c0,#1976d2)",
+                  boxShadow: "0 4px 15px rgba(25,118,210,0.3)",
+                  opacity: isBuyingTicket ? 0.6 : 1
+                }}
+              >
+                {isBuyingTicket ? T("processing") : T("buyTicketBtn")}
+              </button>
+              <button 
+                className="btn-gray" 
+                onClick={() => {
+                  if (settings.sound) Sounds.click();
+                  setShowTicketPrompt(false);
+                }}
+                disabled={isBuyingTicket}
+              >
+                {T("back")}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

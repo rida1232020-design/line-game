@@ -108,7 +108,7 @@ export default function RewardsScreen({ onBack, T, lang, stats, onUpdateStats, s
     setIsPurchasing(true);
     try {
       const paymentData = {
-        amount: 0.1, // 0.1 Pi
+        amount: 5.0, // 5.0 Pi
         memo: "Purchase 250 Gems - Goal Rush Line Game",
         metadata: { gemsAmount: 250 },
       };
